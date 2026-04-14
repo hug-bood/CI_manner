@@ -1,0 +1,56 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.11.0
+2 info using node@v24.14.1
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\b00906591\CI管理APP\.npmrc
+5 silly config load:file:C:\Users\b00906591\.npmrc
+6 silly config load:file:C:\Users\b00906591\CI管理APP\%APPDATA%\npm\etc\npmrc
+7 verbose title npm create vite@latest frontend --template vue-ts
+8 verbose argv "create" "vite@latest" "frontend" "--" "--template" "vue-ts"
+9 verbose logfile logs-max:10 dir:C:\Users\b00906591\CI管理APP\%APPDATA%\npm-cache\_logs\2026-04-09T07_46_43_468Z-
+10 verbose logfile C:\Users\b00906591\CI管理APP\%APPDATA%\npm-cache\_logs\2026-04-09T07_46_43_468Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 http fetch GET 200 https://registry.npmmirror.com/create-vite 367ms (cache miss)
+14 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+15 http fetch GET 200 https://registry.npmmirror.com/npm 1553ms
+16 silly idealTree buildDeps
+17 silly fetch manifest create-vite@9.0.4
+18 silly packumentCache full:https://registry.npmmirror.com/create-vite cache-miss
+19 http fetch GET 200 https://registry.npmmirror.com/create-vite 163ms (cache miss)
+20 silly packumentCache full:https://registry.npmmirror.com/create-vite set size:57857 disposed:false
+21 silly placeDep ROOT create-vite@9.0.4 OK for:  want: 9.0.4
+22 silly reify moves {}
+23 silly audit bulk request { 'create-vite': [ '9.0.4' ] }
+24 http cache create-vite@https://registry.npmmirror.com/create-vite/-/create-vite-9.0.4.tgz 0ms (cache hit)
+25 silly tarball no local data for create-vite@https://registry.npmmirror.com/create-vite/-/create-vite-9.0.4.tgz. Extracting by manifest.
+26 http fetch POST 404 https://registry.npmmirror.com/-/npm/v1/security/advisories/bulk 29ms
+27 verbose audit error HttpErrorGeneral: 404 Not Found - POST https://registry.npmmirror.com/-/npm/v1/security/advisories/bulk - [NOT_IMPLEMENTED] /-/npm/v1/security/* not implemented yet
+27 verbose audit error     at C:\Program Files\nodejs\node_modules\npm\node_modules\npm-registry-fetch\lib\check-response.js:103:15
+27 verbose audit error     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+27 verbose audit error     at async #getReport (C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\arborist\lib\audit-report.js:275:19)
+27 verbose audit error     at async AuditReport.run (C:\Program Files\nodejs\node_modules\npm\node_modules\@npmcli\arborist\lib\audit-report.js:100:19) {
+27 verbose audit error   headers: [Object: null prototype] {
+27 verbose audit error     server: [ 'Tengine' ],
+27 verbose audit error     date: [ 'Thu, 09 Apr 2026 07:46:45 GMT' ],
+27 verbose audit error     'content-type': [ 'application/json' ],
+27 verbose audit error     'transfer-encoding': [ 'chunked' ],
+27 verbose audit error     connection: [ 'keep-alive' ],
+27 verbose audit error     'strict-transport-security': [ 'max-age=5184000' ],
+27 verbose audit error     via: [ 'kunlun19.cn9081[,404666]' ],
+27 verbose audit error     'timing-allow-origin': [ '*' ],
+27 verbose audit error     eagleid: [ '249c5f5a17757208057278425e' ],
+27 verbose audit error     'x-fetch-attempts': [ '1' ]
+27 verbose audit error   },
+27 verbose audit error   statusCode: 404,
+27 verbose audit error   code: 'E404',
+27 verbose audit error   method: 'POST',
+27 verbose audit error   uri: 'https://registry.npmmirror.com/-/npm/v1/security/advisories/bulk',
+27 verbose audit error   body: {
+27 verbose audit error     error: '[NOT_IMPLEMENTED] /-/npm/v1/security/* not implemented yet'
+27 verbose audit error   },
+27 verbose audit error   pkgid: undefined
+27 verbose audit error }
+28 silly audit error [object Object]
+29 silly audit report null
+30 http fetch GET 200 https://cdn.npmmirror.com/packages/create-vite/9.0.4/create-vite-9.0.4.tgz 1037ms (cache miss)
