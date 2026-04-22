@@ -15,6 +15,10 @@
             <el-icon><List /></el-icon>
             <span>工程列表</span>
           </el-menu-item>
+          <el-menu-item index="/archive">
+            <el-icon><Document /></el-icon>
+            <span>历史归档</span>
+          </el-menu-item>
         </el-menu>
       </el-aside>
       <el-main>
@@ -26,7 +30,7 @@
 
 <script setup lang="ts">
 import VersionSelector from './VersionSelector.vue'
-import { DataAnalysis, List } from '@element-plus/icons-vue'
+import { DataAnalysis, List, Document } from '@element-plus/icons-vue'
 </script>
 
 <style scoped>

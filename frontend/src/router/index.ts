@@ -3,6 +3,7 @@ import Layout from '@/components/Layout.vue'
 import Dashboard from '@/views/Dashboard.vue'
 import ProjectList from '@/views/ProjectList.vue'
 import ProjectDetail from '@/views/ProjectDetail.vue'
+import ArchiveList from '@/views/ArchiveList.vue'
 
 const routes = [
   {
@@ -13,6 +14,7 @@ const routes = [
       { path: 'dashboard', component: Dashboard },
       { path: 'projects', component: ProjectList },
       { path: 'projects/:id', component: ProjectDetail, props: true },
+      { path: 'archive', component: ArchiveList },
     ]
   }
 ]

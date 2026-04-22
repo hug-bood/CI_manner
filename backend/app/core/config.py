@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "CI Management API"
     VERSION: str = "3.0.0"
     DATABASE_URL: str = "sqlite:///./ci.db"
+    ARCHIVE_DATABASE_URL: str = "sqlite:///./ci_archive.db"
     SECRET_KEY: str = "change-me-in-production"
 
     class Config:

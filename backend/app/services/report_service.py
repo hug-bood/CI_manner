@@ -1,10 +1,13 @@
 from sqlalchemy.orm import Session
 from datetime import datetime
+from fastapi.encoders import jsonable_encoder
+
 from app.models.project import Project
 from app.models.test_case import TestCase
 from app.schemas.report import ReportCreate
 from app.services.project_service import recalc_project_stats
-from fastapi.encoders import jsonable_encoder
+from app.services.log_service import download_and_extract_zip
+from app.services.xml_parser import find_and_parse_result_xml
 
 def parse_version(version_str: str):
     """从完整版本字符串提取产品名和版本号"""
@@ -12,7 +15,7 @@ def parse_version(version_str: str):
     if len(parts) == 2:
         return parts[0], parts[1]
     else:
-        return version_str, ""  # fallback
+        return version_str, ""
 
 def process_report(db: Session, report: ReportCreate):
     # 1. 解析产品名和版本
@@ -21,7 +24,7 @@ def process_report(db: Session, report: ReportCreate):
     # 2. 查找或创建工程
     project = db.query(Project).filter_by(
         product_name=product_name,
-        version=report.version,   # 存储完整字符串
+        version=report.version,
         project_name=report.test_project_name
     ).first()
 
@@ -30,12 +33,11 @@ def process_report(db: Session, report: ReportCreate):
             product_name=product_name,
             version=report.version,
             project_name=report.test_project_name,
-            status="active"  # 初始状态
+            status="active"
         )
         db.add(project)
         db.flush()  # 获取 id
     else:
-        # 如果当前是 lost，上报后改为 active
         if project.status == "lost":
             project.status = "active"
 
@@ -44,20 +46,21 @@ def process_report(db: Session, report: ReportCreate):
     # 3. 查找或创建用例记录
     test_case = db.query(TestCase).filter_by(
         project_id=project.id,
-        suite_name=report.test_suite_name,
         test_name=report.test_name
     ).first()
 
     if not test_case:
         test_case = TestCase(
             project_id=project.id,
-            suite_name=report.test_suite_name,
-            test_name=report.test_name
+            test_name=report.test_name,
+            status=report.status          # 创建时直接赋予 status
         )
         db.add(test_case)
+        db.flush()  # 获取 test_case.id
+    else:
+        test_case.status = report.status
 
-    # 4. 更新用例字段
-    test_case.status = report.status
+    # 4. 更新其他用例字段
     test_case.raw_data = jsonable_encoder(report.model_dump())
     test_case.last_report_at = report.timestamp or datetime.utcnow()
     if report.timestamp:
@@ -65,9 +68,21 @@ def process_report(db: Session, report: ReportCreate):
     else:
         test_case.report_date = datetime.utcnow().date()
 
+    # 5. 处理 log_url（如果有）
+    if report.log_url:
+        try:
+            log_path = download_and_extract_zip(report.log_url, test_case.id)
+            test_case.log_path = log_path
+            # 解析 result_*.xml
+            summary = find_and_parse_result_xml(log_path)
+            if summary:
+                test_case.xml_summary = summary
+        except Exception as e:
+            print(f"Failed to process log for test_case {test_case.id}: {e}")
+
     db.commit()
 
-    # 5. 重新计算工程统计
+    # 6. 重新计算工程统计
     recalc_project_stats(db, project.id)
 
     return project, test_case

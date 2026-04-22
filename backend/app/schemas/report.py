@@ -4,7 +4,6 @@ from datetime import datetime
 
 class ReportCreate(BaseModel):
     test_project_name: str
-    test_suite_name: str
     test_name: str
     version: str
     group_id: Optional[str] = None
@@ -13,12 +12,12 @@ class ReportCreate(BaseModel):
     subrecord_id: Optional[str] = None
     status: str  # pass, fail, lost
     timestamp: Optional[datetime] = None
+    log_url: Optional[str] = None          # 新增：日志压缩包下载链接
 
     class Config:
         json_schema_extra = {
             "example": {
                 "test_project_name": "dhf_gmem_sdv",
-                "test_suite_name": "SUit_Gmem_API_TEST",
                 "test_name": "Test_Gmem_API_001",
                 "version": "QingLuan V100R026C10",
                 "group_id": "group-001",
@@ -26,6 +25,7 @@ class ReportCreate(BaseModel):
                 "record_id": "rec-456",
                 "subrecord_id": "sub-789",
                 "status": "fail",
-                "timestamp": "2026-04-09T10:15:00Z"
+                "timestamp": "2026-04-09T10:15:00Z",
+                "log_url": "https://example.com/logs/12345.zip"
             }
         }

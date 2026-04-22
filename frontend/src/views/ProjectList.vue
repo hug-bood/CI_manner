@@ -2,16 +2,10 @@
   <div class="project-list">
     <h2>工程列表</h2>
 
-    <!-- 筛选栏：输入实时搜索，无查询按钮 -->
+    <!-- 筛选栏 -->
     <el-form :inline="true" class="filter-form">
       <el-form-item label="状态">
-        <el-select
-          v-model="filterStatus"
-          placeholder="全部"
-          clearable
-          style="width: 120px"
-          @change="handleFilterChange"
-        >
+        <el-select v-model="filterStatus" placeholder="全部" clearable style="width: 120px">
           <el-option label="全部" value="all" />
           <el-option label="成功" value="success" />
           <el-option label="失败" value="failure" />
@@ -23,8 +17,8 @@
           v-model="filterSearch"
           placeholder="输入工程名"
           clearable
-          style="width: 180px"
-          @input="handleFilterChange"
+          style="width: 170px"
+          @input="debouncedFetchProjects"
         />
       </el-form-item>
       <el-form-item label="责任人">
@@ -33,7 +27,7 @@
           placeholder="输入责任人"
           clearable
           style="width: 150px"
-          @input="handleFilterChange"
+          @input="debouncedFetchProjects"
         />
       </el-form-item>
       <el-form-item label="PL">
@@ -42,10 +36,9 @@
           placeholder="输入PL"
           clearable
           style="width: 120px"
-          @input="handleFilterChange"
+          @input="debouncedFetchProjects"
         />
       </el-form-item>
-      <!-- 重置按钮保留，方便清空所有筛选 -->
       <el-form-item>
         <el-button @click="resetFilters">重置</el-button>
       </el-form-item>
@@ -84,26 +77,46 @@
         </template>
       </el-table-column>
 
+      <!-- 责任人：点击激活编辑 -->
       <el-table-column label="责任人" width="140">
         <template #default="{ row }">
+          <div
+            v-if="editingOwnerId !== row.id"
+            class="editable-cell"
+            :class="{ 'text-muted': !row.owner }"
+            @click="startEditOwner(row)"
+          >
+            {{ row.owner || '点击填写' }}
+          </div>
           <el-input
-            v-model="row.owner"
-            placeholder="未分配"
+            v-else
+            ref="ownerInputRef"
+            v-model="ownerInputValue"
             size="small"
-            @blur="updateOwner(row)"
-            @keyup.enter="updateOwner(row)"
+            @blur="saveOwner(row)"
+            @keyup.enter="saveOwner(row)"
           />
         </template>
       </el-table-column>
 
+      <!-- PL：点击激活编辑 -->
       <el-table-column label="PL" width="100">
         <template #default="{ row }">
+          <div
+            v-if="editingPlId !== row.id"
+            class="editable-cell"
+            :class="{ 'text-muted': !row.pl }"
+            @click="startEditPl(row)"
+          >
+            {{ row.pl || '点击填写' }}
+          </div>
           <el-input
-            v-model="row.pl"
-            placeholder="未分配"
+            v-else
+            ref="plInputRef"
+            v-model="plInputValue"
             size="small"
-            @blur="updatePl(row)"
-            @keyup.enter="updatePl(row)"
+            @blur="savePl(row)"
+            @keyup.enter="savePl(row)"
           />
         </template>
       </el-table-column>
@@ -124,12 +137,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { getProjectList, updateProject, type ProjectItem } from '@/api/projects'
 import { ElMessage } from 'element-plus'
-import { debounce } from 'lodash-es' // 需要安装 lodash-es: npm install lodash-es
+import { debounce } from 'lodash-es'
 
 const router = useRouter()
 const appStore = useAppStore()
@@ -144,6 +157,15 @@ const filterOwner = ref('')
 const filterPl = ref('')
 
 const pagination = ref({ page: 1, size: 20, total: 0 })
+
+// 内联编辑状态
+const editingOwnerId = ref<number | null>(null)
+const ownerInputValue = ref('')
+const ownerInputRef = ref<HTMLInputElement>()
+
+const editingPlId = ref<number | null>(null)
+const plInputValue = ref('')
+const plInputRef = ref<HTMLInputElement>()
 
 const statusTagType = (status: string) => {
   switch (status) {
@@ -160,7 +182,6 @@ const progressColor = (percent: number) => {
   return '#f56c6c'
 }
 
-// 实际请求函数
 const fetchProjects = async () => {
   if (!appStore.currentProduct || !appStore.currentVersion) {
     ElMessage.warning('请先选择产品和版本')
@@ -185,18 +206,11 @@ const fetchProjects = async () => {
   }
 }
 
-// 防抖处理，输入时触发，重置页码
-const debouncedFetch = debounce(() => {
+const debouncedFetchProjects = debounce(() => {
   pagination.value.page = 1
   fetchProjects()
 }, 300)
 
-// 筛选条件变化时的处理（状态变更立即触发，输入通过防抖）
-const handleFilterChange = () => {
-  debouncedFetch()
-}
-
-// 重置所有筛选条件
 const resetFilters = () => {
   filterStatus.value = 'all'
   filterSearch.value = ''
@@ -206,23 +220,45 @@ const resetFilters = () => {
   fetchProjects()
 }
 
-const updateOwner = async (row: ProjectItem) => {
+// 责任人编辑
+const startEditOwner = (row: ProjectItem) => {
+  editingOwnerId.value = row.id
+  ownerInputValue.value = row.owner || ''
+  nextTick(() => ownerInputRef.value?.focus())
+}
+
+const saveOwner = async (row: ProjectItem) => {
+  const newValue = ownerInputValue.value.trim()
+  editingOwnerId.value = null
+  if (newValue === (row.owner || '')) return
   try {
-    await updateProject(row.id, { owner: row.owner })
+    await updateProject(row.id, { owner: newValue || null })
+    row.owner = newValue || null
     ElMessage.success('责任人已更新')
   } catch (e) {
     ElMessage.error('更新失败')
-    fetchProjects()
+    await fetchProjects()
   }
 }
 
-const updatePl = async (row: ProjectItem) => {
+// PL 编辑
+const startEditPl = (row: ProjectItem) => {
+  editingPlId.value = row.id
+  plInputValue.value = row.pl || ''
+  nextTick(() => plInputRef.value?.focus())
+}
+
+const savePl = async (row: ProjectItem) => {
+  const newValue = plInputValue.value.trim()
+  editingPlId.value = null
+  if (newValue === (row.pl || '')) return
   try {
-    await updateProject(row.id, { pl: row.pl })
+    await updateProject(row.id, { pl: newValue || null })
+    row.pl = newValue || null
     ElMessage.success('PL已更新')
   } catch (e) {
     ElMessage.error('更新失败')
-    fetchProjects()
+    await fetchProjects()
   }
 }
 
@@ -230,7 +266,6 @@ const goToDetail = (id: number) => {
   router.push(`/projects/${id}`)
 }
 
-// 监听产品/版本变化，重置页码并查询
 watch(() => [appStore.currentProduct, appStore.currentVersion], () => {
   pagination.value.page = 1
   fetchProjects()
@@ -247,5 +282,35 @@ watch(() => [appStore.currentProduct, appStore.currentVersion], () => {
 .pagination {
   margin-top: 20px;
   justify-content: flex-end;
+}
+
+/* 可编辑单元格样式 */
+.editable-cell {
+  min-height: 32px;
+  line-height: 32px;
+  padding: 0 8px;
+  border-radius: 4px;
+  cursor: text;
+  transition: background-color 0.2s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.editable-cell:hover {
+  background-color: #f5f7fa;
+}
+.text-muted {
+  color: #c0c4cc;
+}
+
+:deep(.el-table .el-input) {
+  width: 100%;
+}
+:deep(.el-table .el-input__wrapper) {
+  padding: 0 8px;
+}
+:deep(.el-table .el-input__inner) {
+  height: 32px;
+  line-height: 32px;
 }
 </style>

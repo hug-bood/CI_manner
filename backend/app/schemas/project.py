@@ -35,3 +35,10 @@ class SummaryResponse(BaseModel):
 class ProjectUpdate(BaseModel):
     owner: Optional[str] = None
     pl: Optional[str] = None
+
+class ProjectCreate(BaseModel):
+    product_name: str
+    version: str
+    project_name: str
+    owner: Optional[str] = None
+    pl: Optional[str] = None

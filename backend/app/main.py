@@ -3,21 +3,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.core.config import get_settings
-from app.core.database import engine, Base
+from app.core.database import engine, Base, archive_engine, ArchiveBase
 from app.api.v1.router import api_router
 from app.core.scheduler import start_scheduler
+
+# 导入所有模型以确保表被创建
+from app.models import project, test_case, archive
 
 settings = get_settings()
 
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
+ArchiveBase.metadata.create_all(bind=archive_engine)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动定时任务
     start_scheduler()
     yield
-    # 关闭时清理资源（可选）
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -25,7 +27,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS 配置
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:8080", "*"],
