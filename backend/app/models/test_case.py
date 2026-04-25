@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, Text, Date, JSON, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, Text, Date, JSON, DateTime, ForeignKey
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -8,6 +8,7 @@ class TestCase(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     test_name = Column(String(255), nullable=False)
+    record_id = Column(String(255), nullable=True)          # 用于区分不同批次的上报
     status = Column(String(20), nullable=False)
     is_analyzed = Column(Boolean, default=False)
     failure_reason = Column(Text, nullable=True)
@@ -19,10 +20,6 @@ class TestCase(Base):
     is_source_code_issue = Column(Boolean, default=False)
     dts_ticket = Column(String(100), nullable=True)
     log_path = Column(String(500), nullable=True)
-    xml_summary = Column(JSON, nullable=True)          # 新增：存储解析后的 XML 摘要
+    xml_summary = Column(JSON, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint("project_id", "test_name", name="uq_testcase"),
-    )

@@ -1,60 +1,39 @@
 <template>
   <div class="archive-list">
-    <h2>历史失败归档</h2>
+    <h2>历史归档</h2>
+
+    <!-- 页签切换 -->
+    <el-tabs v-model="activeTab" @tab-change="onTabChange">
+      <el-tab-pane label="失败归档" name="failures" />
+      <el-tab-pane label="概率失败" name="probabilistic" />
+    </el-tabs>
 
     <!-- 筛选栏 -->
     <el-form :inline="true" class="filter-form">
-      <el-form-item label="工程名">
-        <el-input
-          v-model="filter.project_name"
-          placeholder="工程名"
-          clearable
-          size="small"
-          @input="debouncedFetch"
-        />
-      </el-form-item>
-      <el-form-item label="套件名">
-        <el-input
-          v-model="filter.suite_name"
-          placeholder="套件名"
-          clearable
-          size="small"
-          @input="debouncedFetch"
-        />
-      </el-form-item>
-      <el-form-item label="用例名">
-        <el-input
-          v-model="filter.test_name"
-          placeholder="用例名"
-          clearable
-          size="small"
-          @input="debouncedFetch"
-        />
-      </el-form-item>
-      <el-form-item label="状态">
-        <el-select v-model="filter.status" placeholder="全部" clearable size="small" @change="fetchData">
-          <el-option label="失败" value="fail" />
-          <el-option label="丢失" value="lost" />
-          <el-option label="处理中" value="processing" />
+      <el-form-item label="特性">
+        <el-select v-model="filter.feature_name" placeholder="全部" clearable size="small" style="width:140px" @change="fetchData">
+          <el-option v-for="f in features" :key="f.id" :label="f.feature_name" :value="f.feature_name" />
         </el-select>
       </el-form-item>
-      <el-form-item label="责任人">
-        <el-input
-          v-model="filter.owner"
-          placeholder="责任人"
-          clearable
-          size="small"
-          @input="debouncedFetch"
-        />
+      <el-form-item label="工程名">
+        <el-input v-model="filter.project_name" placeholder="工程名" clearable size="small" @input="debouncedFetch" />
+      </el-form-item>
+      <el-form-item label="用例名">
+        <el-input v-model="filter.test_name" placeholder="用例名" clearable size="small" @input="debouncedFetch" />
       </el-form-item>
       <el-form-item label="PL">
-        <el-input
-          v-model="filter.pl"
-          placeholder="PL"
-          clearable
-          size="small"
-          @input="debouncedFetch"
-        />
+        <el-input v-model="filter.pl" placeholder="PL" clearable size="small" @input="debouncedFetch" />
+      </el-form-item>
+      <el-form-item label="分析状态">
+        <el-select v-model="filter.is_analyzed" placeholder="全部" clearable size="small" style="width:110px" @change="fetchData">
+          <el-option label="已分析" :value="true" />
+          <el-option label="未分析" :value="false" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="连续成功天数">
+        <el-input-number v-model="filter.consecutive_success_days_min" :min="0" placeholder="最小" size="small" style="width:90px" @change="fetchData" />
+        <span style="margin:0 4px">-</span>
+        <el-input-number v-model="filter.consecutive_success_days_max" :min="0" placeholder="最大" size="small" style="width:90px" @change="fetchData" />
       </el-form-item>
       <el-form-item>
         <el-button size="small" @click="resetFilters">重置</el-button>
@@ -73,28 +52,74 @@
           <el-statistic title="平均连续失败天数" :value="avgConsecutiveDays" :precision="1" />
         </el-card>
       </el-col>
+      <el-col :span="6">
+        <el-card shadow="hover">
+          <el-statistic title="未分析数" :value="unanalyzedCount" />
+        </el-card>
+      </el-col>
+      <el-col :span="6">
+        <el-card shadow="hover">
+          <div class="retention-card">
+            <div class="retention-label">已修复用例保留天数</div>
+            <div v-if="!editingRetention" class="retention-value" :class="{ 'retention-readonly': !isAdmin }" @click="isAdmin && startEditRetention()">
+              {{ retentionDays }}天
+              <el-icon v-if="isAdmin" style="margin-left:4px;cursor:pointer;color:#409eff"><Edit /></el-icon>
+            </div>
+            <div v-else class="retention-edit">
+              <el-input-number v-model="retentionDaysInput" size="small" :min="1" :max="365" style="width:100px" />
+              <el-button type="primary" size="small" @click="saveRetention" style="margin-left:4px">确定</el-button>
+              <el-button size="small" @click="editingRetention = false" style="margin-left:4px">取消</el-button>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 操作栏 -->
+    <el-row class="action-row">
+      <el-button type="danger" size="small" @click="showCleanupDialog" :disabled="!canCleanup">人工清理</el-button>
+      <span class="action-hint" v-if="canCleanup">将清理已分析且连续成功天数 >= {{ retentionDays }}天的归档记录</span>
     </el-row>
 
     <!-- 数据表格 -->
     <el-table :data="items" stripe v-loading="loading" style="width: 100%">
-      <el-table-column prop="project_name" label="工程名" width="150" />
-      <el-table-column prop="suite_name" label="套件名" width="180" />
-      <el-table-column prop="test_name" label="用例名" min-width="200" />
-      <el-table-column prop="status" label="状态" width="90">
-        <template #default="{ row }">
-          <el-tag :type="statusTagType(row.status)">{{ row.status }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="failure_date" label="失败日期" width="120" />
-      <el-table-column prop="first_failure_date" label="起始日期" width="120" />
-      <el-table-column prop="consecutive_days" label="连续天数" width="100">
-        <template #default="{ row }">
-          <el-tag :type="consecutiveTagType(row.consecutive_days)">{{ row.consecutive_days }} 天</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="failure_reason" label="失败原因" min-width="180" show-overflow-tooltip />
-      <el-table-column prop="owner" label="责任人" width="100" />
+      <el-table-column prop="feature_name" label="特性" width="120" />
+      <el-table-column prop="project_name" label="工程名" width="140" />
+      <el-table-column prop="test_name" label="用例名" min-width="180" />
       <el-table-column prop="pl" label="PL" width="80" />
+      <el-table-column label="分析状态" width="100" align="center">
+        <template #default="{ row }">
+          <el-tag :type="row.is_analyzed ? 'success' : 'warning'" style="cursor:pointer" @click="toggleAnalyzed(row)">
+            {{ row.is_analyzed ? '已分析' : '未分析' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="failure_date" label="失败日期" width="110" />
+      <el-table-column prop="first_failure_date" label="起始日期" width="110" />
+      <el-table-column prop="consecutive_days" label="连续失败" width="90" align="center">
+        <template #default="{ row }">
+          <el-tag :type="consecutiveTagType(row.consecutive_days)">{{ row.consecutive_days }}天</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="consecutive_success_days" label="连续成功" width="90" align="center">
+        <template #default="{ row }">
+          <span v-if="row.consecutive_success_days > 0" style="color:#67c23a">{{ row.consecutive_success_days }}天</span>
+          <span v-else style="color:#909399">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="failure_reason" label="失败原因" min-width="160" show-overflow-tooltip />
+      <el-table-column prop="owner" label="责任人" width="90" />
+      <el-table-column label="概率失败" width="80" align="center">
+        <template #default="{ row }">
+          <el-checkbox v-model="row.is_probabilistic" @change="(val: boolean) => onProbabilisticChange(row, val)" />
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="120" fixed="right" align="center">
+        <template #default="{ row }">
+          <el-button type="primary" link size="small" @click="showHistory(row)">历史</el-button>
+          <el-button type="primary" link size="small" @click="markAnalyzed(row)" v-if="!row.is_analyzed">标记已分析</el-button>
+        </template>
+      </el-table-column>
     </el-table>
 
     <el-pagination
@@ -107,14 +132,50 @@
       @current-change="fetchData"
       class="pagination"
     />
+
+    <!-- 人工清理弹窗 -->
+    <el-dialog v-model="cleanupDialogVisible" title="人工清理归档数据" width="500px">
+      <p>将清理已分析且连续成功天数 >= <b>{{ retentionDays }}</b>天的归档记录。</p>
+      <p style="color: #909399; font-size: 13px; margin-top: 8px;">保留天数可在上方卡片中编辑，按产品版本级别配置。</p>
+      <template #footer>
+        <el-button @click="cleanupDialogVisible = false">取消</el-button>
+        <el-button type="danger" @click="doCleanup" :loading="cleanupLoading">确认清理</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 清理结果弹窗 -->
+    <el-dialog v-model="cleanupResultVisible" title="清理结果" width="500px">
+      <p>{{ cleanupResultMessage }}</p>
+      <template #footer>
+        <el-button type="primary" @click="cleanupResultVisible = false">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 历史执行记录弹窗 -->
+    <el-dialog v-model="historyDialogVisible" :title="`执行历史 - ${historyTestName}`" width="700px">
+      <el-table :data="historyItems" stripe v-loading="historyLoading" max-height="400">
+        <el-table-column prop="execution_date" label="执行日期" width="120" />
+        <el-table-column prop="project_name" label="工程" width="140" />
+        <el-table-column prop="status" label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'pass' ? 'success' : 'danger'">{{ row.status }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="failure_reason" label="失败原因" min-width="200" show-overflow-tooltip />
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
-import { getArchiveList, type ArchiveItem } from '@/api/archive'
+import { getArchiveList, getProbabilisticFailures, updateArchiveFailure, cleanupArchiveFailures, getExecutionHistory, type ArchiveItem } from '@/api/archive'
+import { getProductVersionConfig, updateProductVersionConfig } from '@/api/productVersionConfig'
+import { getFeatureList, type FeatureItem } from '@/api/features'
+import { getCurrentUser, type UserItem } from '@/api/authAndBackup'
 import { ElMessage } from 'element-plus'
+import { Edit } from '@element-plus/icons-vue'
 import { debounce } from 'lodash-es'
 
 const appStore = useAppStore()
@@ -122,24 +183,38 @@ const appStore = useAppStore()
 const loading = ref(false)
 const items = ref<ArchiveItem[]>([])
 const pagination = ref({ page: 1, size: 20, total: 0 })
+const activeTab = ref('failures')
+const features = ref<FeatureItem[]>([])
+const currentUser = ref<UserItem | null>(null)
 
 const filter = reactive({
+  feature_name: '',
   project_name: '',
-  suite_name: '',
   test_name: '',
-  status: '',
-  owner: '',
-  pl: ''
+  pl: '',
+  is_analyzed: undefined as boolean | undefined,
+  consecutive_success_days_min: undefined as number | undefined,
+  consecutive_success_days_max: undefined as number | undefined
 })
 
-const statusTagType = (status: string) => {
-  switch (status) {
-    case 'fail': return 'danger'
-    case 'lost': return 'info'
-    case 'processing': return 'warning'
-    default: return ''
-  }
-}
+// 保留天数（产品版本级别）
+const retentionDays = ref(30)
+const editingRetention = ref(false)
+const retentionDaysInput = ref(30)
+
+// 清理相关
+const cleanupDialogVisible = ref(false)
+const cleanupLoading = ref(false)
+const canCleanup = computed(() => currentUser.value?.is_admin || currentUser.value?.can_cleanup)
+const isAdmin = computed(() => currentUser.value?.is_admin)
+const cleanupResultVisible = ref(false)
+const cleanupResultMessage = ref('')
+
+// 历史记录相关
+const historyDialogVisible = ref(false)
+const historyLoading = ref(false)
+const historyItems = ref<any[]>([])
+const historyTestName = ref('')
 
 const consecutiveTagType = (days: number) => {
   if (days >= 7) return 'danger'
@@ -153,6 +228,52 @@ const avgConsecutiveDays = computed(() => {
   return sum / items.value.length
 })
 
+const unanalyzedCount = computed(() => {
+  return items.value.filter(i => !i.is_analyzed).length
+})
+
+const fetchFeatures = async () => {
+  if (!appStore.currentProduct || !appStore.currentVersion) return
+  try {
+    const res = await getFeatureList({ product_name: appStore.currentProduct, version: appStore.currentVersion })
+    features.value = res.data.items
+  } catch (e) { /* ignore */ }
+}
+
+const fetchCurrentUser = async () => {
+  // 未登录时不调用API，避免触发401弹窗
+  if (!appStore.isLoggedIn) return
+  try {
+    const res = await getCurrentUser()
+    currentUser.value = res.data
+  } catch (e) { /* ignore */ }
+}
+
+const fetchRetentionDays = async () => {
+  if (!appStore.currentProduct || !appStore.currentVersion) return
+  try {
+    const res = await getProductVersionConfig(appStore.currentProduct, appStore.currentVersion)
+    retentionDays.value = res.data.retention_days
+  } catch (e) { /* use default */ }
+}
+
+const startEditRetention = () => {
+  retentionDaysInput.value = retentionDays.value
+  editingRetention.value = true
+}
+
+const saveRetention = async () => {
+  if (!appStore.currentProduct || !appStore.currentVersion) return
+  try {
+    await updateProductVersionConfig(appStore.currentProduct, appStore.currentVersion, { retention_days: retentionDaysInput.value })
+    retentionDays.value = retentionDaysInput.value
+    editingRetention.value = false
+    ElMessage.success('保留天数已更新')
+  } catch (e) {
+    ElMessage.error('更新失败')
+  }
+}
+
 const fetchData = async () => {
   if (!appStore.currentProduct || !appStore.currentVersion) {
     ElMessage.warning('请先选择产品和版本')
@@ -160,18 +281,21 @@ const fetchData = async () => {
   }
   loading.value = true
   try {
-    const res = await getArchiveList({
+    const params = {
       product_name: appStore.currentProduct,
       version: appStore.currentVersion,
       project_name: filter.project_name || undefined,
-      suite_name: filter.suite_name || undefined,
       test_name: filter.test_name || undefined,
-      status: filter.status || undefined,
-      owner: filter.owner || undefined,
       pl: filter.pl || undefined,
+      feature_name: filter.feature_name || undefined,
+      is_analyzed: filter.is_analyzed,
+      consecutive_success_days_min: filter.consecutive_success_days_min,
+      consecutive_success_days_max: filter.consecutive_success_days_max,
       page: pagination.value.page,
       size: pagination.value.size
-    })
+    }
+    const apiFn = activeTab.value === 'probabilistic' ? getProbabilisticFailures : getArchiveList
+    const res = await apiFn(params)
     items.value = res.data.items
     pagination.value.total = res.data.total
   } catch (e) {
@@ -186,25 +310,107 @@ const debouncedFetch = debounce(() => {
   fetchData()
 }, 300)
 
-const resetFilters = () => {
-  filter.project_name = ''
-  filter.suite_name = ''
-  filter.test_name = ''
-  filter.status = ''
-  filter.owner = ''
-  filter.pl = ''
+const onTabChange = () => {
   pagination.value.page = 1
   fetchData()
+}
+
+const resetFilters = () => {
+  filter.feature_name = ''
+  filter.project_name = ''
+  filter.test_name = ''
+  filter.pl = ''
+  filter.is_analyzed = undefined
+  filter.consecutive_success_days_min = undefined
+  filter.consecutive_success_days_max = undefined
+  pagination.value.page = 1
+  fetchData()
+}
+
+const onProbabilisticChange = async (row: ArchiveItem, val: boolean) => {
+  try {
+    await updateArchiveFailure(row.id, { is_probabilistic: val })
+    ElMessage.success('已更新')
+  } catch (e) {
+    ElMessage.error('更新失败')
+  }
+}
+
+const markAnalyzed = async (row: ArchiveItem) => {
+  try {
+    await updateArchiveFailure(row.id, { is_analyzed: true })
+    row.is_analyzed = true
+    ElMessage.success('已标记为已分析')
+  } catch (e) {
+    ElMessage.error('标记失败')
+  }
+}
+
+const toggleAnalyzed = async (row: ArchiveItem) => {
+  const newValue = !row.is_analyzed
+  try {
+    await updateArchiveFailure(row.id, { is_analyzed: newValue })
+    row.is_analyzed = newValue
+    ElMessage.success(newValue ? '已标记为已分析' : '已标记为未分析')
+  } catch (e) {
+    ElMessage.error('更新失败')
+  }
+}
+
+const showCleanupDialog = () => {
+  cleanupDialogVisible.value = true
+}
+
+const doCleanup = async () => {
+  if (!appStore.currentProduct || !appStore.currentVersion) return
+  cleanupLoading.value = true
+  try {
+    const res = await cleanupArchiveFailures(appStore.currentProduct, appStore.currentVersion)
+    cleanupDialogVisible.value = false
+    cleanupResultMessage.value = res.data.message
+    cleanupResultVisible.value = true
+    fetchData()
+  } catch (e) {
+    ElMessage.error('清理失败')
+  } finally {
+    cleanupLoading.value = false
+  }
+}
+
+const showHistory = async (row: ArchiveItem) => {
+  historyTestName.value = row.test_name
+  historyDialogVisible.value = true
+  historyLoading.value = true
+  try {
+    const res = await getExecutionHistory({
+      product_name: row.product_name,
+      version: row.version,
+      project_name: row.project_name,
+      test_name: row.test_name,
+      page: 1,
+      size: 50
+    })
+    historyItems.value = res.data.items
+  } catch (e) {
+    ElMessage.error('获取历史记录失败')
+  } finally {
+    historyLoading.value = false
+  }
 }
 
 watch(() => [appStore.currentProduct, appStore.currentVersion], () => {
   pagination.value.page = 1
   fetchData()
+  fetchFeatures()
+  fetchRetentionDays()
 }, { immediate: true })
 
 onMounted(() => {
+  fetchCurrentUser()
   if (appStore.currentProduct && appStore.currentVersion) {
     fetchData()
+    fetchFeatures()
+    fetchRetentionDays()
   }
 })
 </script>
@@ -219,8 +425,38 @@ onMounted(() => {
 .stats-row {
   margin-bottom: 20px;
 }
+.action-row {
+  margin-bottom: 16px;
+}
+.action-hint {
+  margin-left: 12px;
+  color: #909399;
+  font-size: 13px;
+}
 .pagination {
   margin-top: 20px;
   justify-content: flex-end;
+}
+.retention-card {
+  text-align: center;
+}
+.retention-label {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 4px;
+}
+.retention-value {
+  font-size: 20px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+.retention-readonly {
+  cursor: default;
+}
+.retention-edit {
+  display: inline-flex;
+  align-items: center;
 }
 </style>

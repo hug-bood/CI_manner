@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, Text, UniqueConstraint
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -12,6 +12,7 @@ class Project(Base):
     status = Column(String(20), nullable=False, default="lost")
     owner = Column(String(100), nullable=True)
     pl = Column(String(50), nullable=True)
+    failure_reason = Column(Text, nullable=True)
     total_cases = Column(Integer, default=0)
     total_failed_cases = Column(Integer, default=0)
     analyzed_failed_cases = Column(Integer, default=0)

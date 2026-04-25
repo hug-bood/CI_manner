@@ -1,9 +1,20 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 
 export const useAppStore = defineStore('app', () => {
   const currentProduct = ref<string>('')
   const currentVersion = ref<string>('')
+
+  // 工程数据版本号：每次增/改/删操作后递增，用于跨页面同步刷新
+  const projectDataVersion = ref(0)
+
+  // 登录状态
+  const token = ref<string>(localStorage.getItem('token') || '')
+  const username = ref<string>(localStorage.getItem('username') || '')
+  const isAdmin = ref<boolean>(localStorage.getItem('isAdmin') === 'true')
+  const canCleanup = ref<boolean>(localStorage.getItem('canCleanup') === 'true')
+
+  const isLoggedIn = computed(() => !!token.value)
 
   function setProduct(product: string) {
     currentProduct.value = product
@@ -13,5 +24,36 @@ export const useAppStore = defineStore('app', () => {
     currentVersion.value = version
   }
 
-  return { currentProduct, currentVersion, setProduct, setVersion }
+  function setLoginInfo(newToken: string, newUser: { username: string; is_admin: boolean; can_cleanup: boolean }) {
+    token.value = newToken
+    username.value = newUser.username
+    isAdmin.value = newUser.is_admin
+    canCleanup.value = newUser.can_cleanup
+    localStorage.setItem('token', newToken)
+    localStorage.setItem('username', newUser.username)
+    localStorage.setItem('isAdmin', String(newUser.is_admin))
+    localStorage.setItem('canCleanup', String(newUser.can_cleanup))
+  }
+
+  function clearLoginInfo() {
+    token.value = ''
+    username.value = ''
+    isAdmin.value = false
+    canCleanup.value = false
+    localStorage.removeItem('token')
+    localStorage.removeItem('username')
+    localStorage.removeItem('isAdmin')
+    localStorage.removeItem('canCleanup')
+  }
+
+  function bumpProjectDataVersion() {
+    projectDataVersion.value++
+  }
+
+  return {
+    currentProduct, currentVersion, setProduct, setVersion,
+    projectDataVersion, bumpProjectDataVersion,
+    token, username, isAdmin, canCleanup, isLoggedIn,
+    setLoginInfo, clearLoginInfo
+  }
 })

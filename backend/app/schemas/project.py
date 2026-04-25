@@ -8,6 +8,7 @@ class ProjectItem(BaseModel):
     status: str
     owner: Optional[str]
     pl: Optional[str]
+    failure_reason: Optional[str] = None
     total_cases: int
     total_failed_cases: int
     analyzed_failed_cases: int
@@ -35,6 +36,7 @@ class SummaryResponse(BaseModel):
 class ProjectUpdate(BaseModel):
     owner: Optional[str] = None
     pl: Optional[str] = None
+    failure_reason: Optional[str] = None
 
 class ProjectCreate(BaseModel):
     product_name: str

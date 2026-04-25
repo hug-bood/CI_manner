@@ -33,6 +33,7 @@ export interface TestCaseListParams {
   pl?: string
   is_analyzed?: boolean
   is_source_code_issue?: boolean
+  failed_only?: boolean
   page?: number
   size?: number
 }

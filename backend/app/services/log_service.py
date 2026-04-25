@@ -14,6 +14,7 @@ LOG_STORAGE_ROOT = os.getenv("LOG_STORAGE_ROOT", "./logs")
 def download_and_extract_zip(url: str, test_case_id: int) -> str:
     """
     下载 zip 文件并解压到以 test_case_id 命名的目录中。
+    如果 test_case_id 为 0，则使用时间戳作为临时目录名。
     返回解压后的目录绝对路径。
     若下载失败或文件损坏，抛出异常。
     """
@@ -30,7 +31,14 @@ def download_and_extract_zip(url: str, test_case_id: int) -> str:
                 f.write(chunk)
 
         # 创建目标解压目录
-        dest_dir = os.path.join(LOG_STORAGE_ROOT, str(test_case_id))
+        if test_case_id == 0:
+            # 使用时间戳作为临时目录名
+            import time
+            dir_name = f"temp_{int(time.time() * 1000)}"
+        else:
+            dir_name = str(test_case_id)
+        
+        dest_dir = os.path.join(LOG_STORAGE_ROOT, dir_name)
         os.makedirs(dest_dir, exist_ok=True)
 
         # 解压 zip 文件

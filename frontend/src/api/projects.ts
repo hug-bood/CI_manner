@@ -6,6 +6,7 @@ export interface ProjectItem {
   status: 'success' | 'failure' | 'lost'
   owner: string | null
   pl: string | null
+  failure_reason: string | null
   total_cases: number
   total_failed_cases: number
   analyzed_failed_cases: number
@@ -88,8 +89,67 @@ export const getProducts = () => {
 export interface ProjectUpdateData {
   owner?: string | null
   pl?: string | null
+  failure_reason?: string | null
 }
 
 export const updateProject = (projectId: number, data: ProjectUpdateData) => {
   return client.patch(`/projects/${projectId}`, data)
+}
+
+export const deleteProject = (projectId: number) => {
+  return client.delete(`/projects/${projectId}`)
+}
+
+export interface ProjectCreateData {
+  product_name: string
+  version: string
+  project_name: string
+  owner?: string | null
+  pl?: string | null
+}
+
+export const createProject = (data: ProjectCreateData) => {
+  return client.post<ProjectItem>('/projects', data)
+}
+
+// ========== 统一工程查询接口 ==========
+
+export interface UnifiedProjectItem {
+  project_id: number | null       // Project 表的 id，不存在则为 null
+  config_id: number | null        // ProjectConfig 表的 id，不存在则为 null
+  product_name: string
+  version: string
+  project_name: string
+  // 来自 Project
+  status: string
+  failure_reason: string | null
+  total_cases: number
+  total_failed_cases: number
+  analyzed_failed_cases: number
+  failure_rate: number
+  analysis_progress: number
+  last_report_at: string | null
+  // 合并字段
+  owner: string | null
+  pl: string | null
+}
+
+export interface UnifiedProjectListResponse {
+  items: UnifiedProjectItem[]
+  total: number
+  page: number
+  size: number
+}
+
+export const getUnifiedProjectList = (params: {
+  product_name: string
+  version: string
+  page?: number
+  size?: number
+  status?: string
+  search?: string
+  owner?: string
+  pl?: string
+}) => {
+  return client.get<UnifiedProjectListResponse>('/unified-projects', { params })
 }

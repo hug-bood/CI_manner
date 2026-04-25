@@ -11,8 +11,14 @@ router = APIRouter()
 def create_report(report: ReportCreate, db: Session = Depends(get_db)):
     """接收 CI 上报数据"""
     try:
-        project, test_case = process_report(db, report)
-        return {"message": "Report processed", "project_id": project.id, "test_case_id": test_case.id}
+        project, test_cases = process_report(db, report)
+        test_case_ids = [tc.id for tc in test_cases]
+        return {
+            "message": "Report processed", 
+            "project_id": project.id, 
+            "test_case_ids": test_case_ids,
+            "total_test_cases": len(test_cases)
+        }
     except Exception as e:
         # 打印完整堆栈到控制台，便于调试
         traceback.print_exc()

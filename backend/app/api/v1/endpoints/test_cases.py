@@ -96,6 +96,7 @@ def list_test_cases(
     pl: Optional[str] = Query(None),
     is_analyzed: Optional[bool] = Query(None),
     is_source_code_issue: Optional[bool] = Query(None),
+    failed_only: bool = Query(False),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db)
@@ -115,6 +116,8 @@ def list_test_cases(
         query = query.filter(TestCase.is_analyzed == is_analyzed)
     if is_source_code_issue is not None:
         query = query.filter(TestCase.is_source_code_issue == is_source_code_issue)
+    if failed_only:
+        query = query.filter(TestCase.status.in_(['fail', 'lost', 'processing']))
 
     total = query.count()
     test_cases = query.offset((page - 1) * size).limit(size).all()
