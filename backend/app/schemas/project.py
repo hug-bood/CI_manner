@@ -37,6 +37,7 @@ class ProjectUpdate(BaseModel):
     owner: Optional[str] = None
     pl: Optional[str] = None
     failure_reason: Optional[str] = None
+    status: Optional[str] = None
 
 class ProjectCreate(BaseModel):
     product_name: str
