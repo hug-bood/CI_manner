@@ -18,6 +18,7 @@ class TestCase(Base):
     raw_data = Column(JSON, nullable=True)
     last_report_at = Column(DateTime, nullable=True)
     is_source_code_issue = Column(Boolean, default=False)
+    is_probabilistic = Column(Boolean, default=False)
     dts_ticket = Column(String(100), nullable=True)
     log_path = Column(String(500), nullable=True)
     xml_summary = Column(JSON, nullable=True)

@@ -38,6 +38,7 @@ class ProjectConfigUpdate(BaseModel):
     pl: Optional[str] = None
     owner: Optional[str] = None
     retention_days: Optional[int] = None
+    status: Optional[str] = None
 
 
 class ProjectConfigListResponse(BaseModel):
@@ -131,24 +132,17 @@ def create_project_config(data: ProjectConfigCreate, db: Session = Depends(get_d
     config = ProjectConfig(**data.model_dump())
     db.add(config)
     db.flush()
-    # 同步创建或更新 Project 的 owner/pl
+    # 确保 Project 存在（不覆盖 owner/pl）
     project = db.query(Project).filter_by(
         product_name=data.product_name,
         version=data.version,
         project_name=data.project_name
     ).first()
-    if project:
-        if data.owner is not None:
-            project.owner = data.owner
-        if data.pl is not None:
-            project.pl = data.pl
-    else:
+    if not project:
         project = Project(
             product_name=data.product_name,
             version=data.version,
             project_name=data.project_name,
-            owner=data.owner,
-            pl=data.pl,
             status="lost"
         )
         db.add(project)
@@ -169,28 +163,26 @@ def update_project_config(config_id: int, data: ProjectConfigUpdate, db: Session
         config.owner = data.owner
     if data.retention_days is not None:
         config.retention_days = data.retention_days
-    # 同步更新 Project 的 owner/pl
+    # status 仍需同步到 Project（工程配置可设置进展状态）
     project = db.query(Project).filter_by(
         product_name=config.product_name,
         version=config.version,
         project_name=config.project_name
     ).first()
     if project:
-        if data.pl is not None:
-            project.pl = data.pl
-        if data.owner is not None:
-            project.owner = data.owner
+        if data.status is not None:
+            if data.status not in ('success', 'failure', 'lost'):
+                raise HTTPException(status_code=400, detail="Invalid status value, must be success/failure/lost")
+            project.status = data.status
     else:
-        # Project 不存在则自动创建
-        project = Project(
-            product_name=config.product_name,
-            version=config.version,
-            project_name=config.project_name,
-            owner=config.owner,
-            pl=config.pl,
-            status="lost"
-        )
-        db.add(project)
+        if data.status is not None and data.status in ('success', 'failure', 'lost'):
+            project = Project(
+                product_name=config.product_name,
+                version=config.version,
+                project_name=config.project_name,
+                status=data.status
+            )
+            db.add(project)
     db.commit()
     db.refresh(config)
     return config
@@ -232,7 +224,7 @@ async def upload_project_configs(
     errors = []
     
     for row_num, row in enumerate(reader, start=2):
-        project_name = row.get('工程', '').strip()
+        project_name = row.get('工程名', '').strip() or row.get('工程', '').strip()
         if not project_name:
             errors.append(f"第{row_num}行：工程名不能为空")
             continue
@@ -260,9 +252,10 @@ async def upload_project_configs(
             ).first()
             if proj:
                 if pl is not None:
-                    proj.pl = pl
+                    existing.pl = pl
                 if owner is not None:
-                    proj.owner = owner
+                    existing.owner = owner
+                updated += 1
         else:
             config = ProjectConfig(
                 product_name=product_name,
@@ -273,24 +266,16 @@ async def upload_project_configs(
             )
             db.add(config)
             imported += 1
-            # 同步创建或更新 Project 的 owner/pl
             proj = db.query(Project).filter_by(
                 product_name=product_name,
                 version=version,
                 project_name=project_name
             ).first()
-            if proj:
-                if pl is not None:
-                    proj.pl = pl
-                if owner is not None:
-                    proj.owner = owner
-            else:
+            if not proj:
                 proj = Project(
                     product_name=product_name,
                     version=version,
                     project_name=project_name,
-                    pl=pl,
-                    owner=owner,
                     status="lost"
                 )
                 db.add(proj)
@@ -314,11 +299,11 @@ def download_project_configs(
     ).all()
     
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=['工程', 'PL', '责任人', '保留天数'])
+    writer = csv.DictWriter(output, fieldnames=['工程名', 'PL', '责任人', '保留天数'])
     writer.writeheader()
     for c in configs:
         writer.writerow({
-            '工程': c.project_name,
+            '工程名': c.project_name,
             'PL': c.pl or '',
             '责任人': c.owner or '',
             '保留天数': c.retention_days

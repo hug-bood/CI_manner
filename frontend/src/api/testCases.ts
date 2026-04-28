@@ -11,6 +11,7 @@ export interface TestCaseItem {
   report_date: string | null
   last_report_at: string | null
   is_source_code_issue: boolean
+  is_probabilistic: boolean
   dts_ticket: string | null
   dts_link: string | null
 }
@@ -22,6 +23,7 @@ export interface TestCaseUpdateData {
   failure_reason?: string | null
   is_analyzed?: boolean
   is_source_code_issue?: boolean
+  is_probabilistic?: boolean
   dts_ticket?: string | null
 }
 

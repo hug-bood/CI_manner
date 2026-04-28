@@ -2,7 +2,7 @@
   <div class="project-detail">
     <el-page-header @back="goBack" :title="project?.name">
       <template #content>
-        <el-tag :type="statusTagType(project?.status)">{{ project?.status || '未知' }}</el-tag>
+        <el-tag :type="projectStatusTagType(project?.status)">{{ projectStatusLabel(project?.status) }}</el-tag>
         <span style="margin-left: 10px">责任人: {{ project?.owner || '未分配' }}</span>
         <span style="margin-left: 10px">PL: {{ project?.pl || '未分配' }}</span>
       </template>
@@ -131,6 +131,15 @@
             <el-checkbox
               v-model="row.is_source_code_issue"
               @change="(val: boolean) => updateField(row, 'is_source_code_issue', val)"
+            />
+          </template>
+        </el-table-column>
+
+        <el-table-column label="概率失败" width="90" align="center">
+          <template #default="{ row }">
+            <el-checkbox
+              v-model="row.is_probabilistic"
+              @change="(val: boolean) => updateField(row, 'is_probabilistic', val)"
             />
           </template>
         </el-table-column>
@@ -289,6 +298,24 @@ const statusTagType = (status?: string) => {
   }
 }
 
+const projectStatusTagType = (status?: string) => {
+  switch (status) {
+    case 'success': return 'success'
+    case 'failure': return 'danger'
+    case 'lost': return 'info'
+    default: return 'info'
+  }
+}
+
+const projectStatusLabel = (status?: string) => {
+  switch (status) {
+    case 'success': return '成功'
+    case 'failure': return '失败'
+    case 'lost': return 'Lost'
+    default: return status || '未知'
+  }
+}
+
 const generateDtsLinkPreview = (ticket: string) => {
   return `https://dts.company.com/ticket/${ticket}`
 }
@@ -349,6 +376,7 @@ const toggleAnalyzed = async (row: TestCaseItem) => {
     await updateTestCase(row.id, { is_analyzed: newValue })
     row.is_analyzed = newValue
     ElMessage.success(newValue ? '已标记为已完成' : '已标记为待分析')
+    appStore.bumpProjectDataVersion()
     await Promise.all([fetchDetail(), fetchCases()])
   } catch (e) {
     ElMessage.error('更新失败')
@@ -359,6 +387,7 @@ const updateField = async (row: TestCaseItem, field: keyof TestCaseUpdateData, v
   try {
     await updateTestCase(row.id, { [field]: value })
     ElMessage.success('更新成功')
+    appStore.bumpProjectDataVersion()
     await Promise.all([fetchDetail(), fetchCases()])
   } catch (e) {
     ElMessage.error('更新失败')
@@ -405,6 +434,7 @@ const saveFailureReason = async (row: TestCaseItem) => {
     row.failure_reason = newValue || null
     if (newValue) row.is_analyzed = true
     ElMessage.success('根因分析已更新')
+    appStore.bumpProjectDataVersion()
     await Promise.all([fetchDetail(), fetchCases()])
   } catch (e) {
     ElMessage.error('更新失败')
@@ -455,6 +485,7 @@ const saveEdit = async () => {
     await updateTestCase(editingRow.value.id, updates)
     ElMessage.success('保存成功')
     editDialogVisible.value = false
+    appStore.bumpProjectDataVersion()
     await Promise.all([fetchDetail(), fetchCases()])
   } catch (e) {
     ElMessage.error('保存失败')

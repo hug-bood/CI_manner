@@ -12,7 +12,7 @@
           <el-option v-for="f in features" :key="f.id" :label="f.feature_name" :value="f.id" />
         </el-select>
       </el-form-item>
-      <el-form-item label="状态">
+      <el-form-item label="进展状态">
         <el-select v-model="filterStatus" placeholder="全部" clearable style="width: 120px" @change="fetchProjects">
           <el-option label="全部" value="all" />
           <el-option label="成功" value="success" />
@@ -54,6 +54,12 @@
 
     <!-- 工程表格 -->
     <el-table :data="projects" stripe style="width: 100%" v-loading="loading">
+      <el-table-column label="特性" width="120">
+        <template #default="{ row }">
+          <span>{{ row.feature_names?.join(', ') || '-' }}</span>
+        </template>
+      </el-table-column>
+
       <el-table-column label="工程名" min-width="160">
         <template #default="{ row }">
           <el-button type="primary" link @click="goToDetail(row)">
@@ -62,10 +68,10 @@
         </template>
       </el-table-column>
 
-      <el-table-column prop="status" label="状态" width="90">
+      <el-table-column prop="status" label="进展状态" width="90">
         <template #default="{ row }">
-          <el-tag :type="statusTagType(row.status)">
-            {{ row.status || '未知' }}
+          <el-tag :type="statusTagType(row.status)" style="cursor:pointer" @click="toggleStatus(row)">
+            {{ statusLabel(row.status) }}
           </el-tag>
         </template>
       </el-table-column>
@@ -248,6 +254,41 @@ const statusTagType = (status: string) => {
   }
 }
 
+const statusLabel = (status: string) => {
+  switch (status) {
+    case 'success': return '成功'
+    case 'failure': return '失败'
+    case 'lost': return 'Lost'
+    default: return status || '未知'
+  }
+}
+
+const toggleStatus = async (row: UnifiedProjectItem) => {
+  // 循环切换：success -> failure -> lost -> success
+  const statusCycle: Record<string, string> = {
+    'success': 'failure',
+    'failure': 'lost',
+    'lost': 'success'
+  }
+  const newStatus = statusCycle[row.status] || 'success'
+  try {
+    if (row.project_id) {
+      await updateProject(row.project_id, { status: newStatus })
+    } else if (row.config_id) {
+      // 没有 CI 上报的工程，通过 ProjectConfig 更新状态（后端会自动创建/更新 Project）
+      await updateProjectConfig(row.config_id, { status: newStatus })
+    } else {
+      ElMessage.warning('无法修改状态')
+      return
+    }
+    row.status = newStatus
+    appStore.bumpProjectDataVersion()
+    ElMessage.success(`状态已切换为${statusLabel(newStatus)}`)
+  } catch (e) {
+    ElMessage.error('状态更新失败')
+  }
+}
+
 const progressColor = (percent: number) => {
   if (percent >= 100) return '#67c23a'
   if (percent >= 50) return '#e6a23c'
@@ -330,11 +371,9 @@ const saveOwner = async (row: UnifiedProjectItem) => {
   editingOwnerKey.value = null
   if (newValue === (row.owner || '')) return
   try {
-    // 优先更新 Project，如果不存在则更新 ProjectConfig
     if (row.project_id) {
       await updateProject(row.project_id, { owner: newValue || null })
-    }
-    if (row.config_id) {
+    } else if (row.config_id) {
       await updateProjectConfig(row.config_id, { owner: newValue || null })
     }
     row.owner = newValue || null
@@ -360,8 +399,7 @@ const savePl = async (row: UnifiedProjectItem) => {
   try {
     if (row.project_id) {
       await updateProject(row.project_id, { pl: newValue || null })
-    }
-    if (row.config_id) {
+    } else if (row.config_id) {
       await updateProjectConfig(row.config_id, { pl: newValue || null })
     }
     row.pl = newValue || null

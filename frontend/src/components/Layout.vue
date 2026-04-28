@@ -70,6 +70,7 @@ const showLogin = () => {
 
 // 监听全局 401 事件，弹出登录对话框
 const onAuthRequired = () => {
+  appStore.clearLoginInfo()
   loginDialogRef.value?.show()
 }
 onMounted(() => {

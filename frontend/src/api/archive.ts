@@ -71,14 +71,34 @@ export const updateArchiveFailure = (id: number, data: {
   is_analyzed?: boolean
   failure_reason?: string | null
   is_probabilistic?: boolean
+  owner?: string | null
 }) => {
   return client.patch(`/archive/failures/${id}`, data)
 }
 
-export const cleanupArchiveFailures = (productName: string, version: string) => {
-  return client.delete<{ message: string; count: number; retention_days: number }>('/archive/failures/cleanup', {
+export interface CleanupItem {
+  id: number
+  project_name: string
+  test_name: string
+  consecutive_success_days: number
+  is_analyzed: boolean
+  failure_date: string
+  feature_name: string | null
+}
+
+export interface CleanupListResponse {
+  items: CleanupItem[]
+  retention_days: number
+}
+
+export const getCleanupList = (productName: string, version: string) => {
+  return client.get<CleanupListResponse>('/archive/failures/cleanup-list', {
     params: { product_name: productName, version }
   })
+}
+
+export const cleanupArchiveFailures = (ids: number[]) => {
+  return client.post<{ message: string; count: number }>('/archive/failures/cleanup', { ids })
 }
 
 export const getExecutionHistory = (params: {

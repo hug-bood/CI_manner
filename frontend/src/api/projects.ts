@@ -90,6 +90,7 @@ export interface ProjectUpdateData {
   owner?: string | null
   pl?: string | null
   failure_reason?: string | null
+  status?: string | null
 }
 
 export const updateProject = (projectId: number, data: ProjectUpdateData) => {
@@ -120,6 +121,7 @@ export interface UnifiedProjectItem {
   product_name: string
   version: string
   project_name: string
+  feature_names: string[]         // 关联的特性名列表
   // 来自 Project
   status: string
   failure_reason: string | null

@@ -16,6 +16,7 @@ class TestCaseItem(BaseModel):
     report_date: Optional[date]
     last_report_at: Optional[datetime]
     is_source_code_issue: bool = False
+    is_probabilistic: bool = False
     dts_ticket: Optional[str] = None
     dts_link: Optional[str] = None
 

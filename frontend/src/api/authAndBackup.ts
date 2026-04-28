@@ -5,6 +5,8 @@ export interface UserItem {
   username: string
   is_admin: boolean
   can_cleanup: boolean
+  last_product: string | null
+  last_version: string | null
 }
 
 export interface LoginResponse {
@@ -50,6 +52,10 @@ export const deleteAllUsers = () => {
 
 export const getCurrentUser = () => {
   return client.get<UserItem>('/auth/me')
+}
+
+export const saveUserPreferences = (data: { last_product?: string | null; last_version?: string | null }) => {
+  return client.patch<UserItem>('/auth/me/preferences', data)
 }
 
 export const getBackupInfo = (productName?: string, version?: string) => {

@@ -6,36 +6,39 @@ import secrets
 import time
 
 from app.core.database import get_db
-from app.models.auth import User
+from app.models.auth import User, UserToken
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# 简易token存储：{token: (user_id, expire_time)}
-_token_store: dict[str, tuple[int, float]] = {}
 TOKEN_EXPIRE_SECONDS = 86400  # 24小时
 
 
 def _generate_token() -> str:
     """生成随机token"""
+    import secrets
     return secrets.token_hex(32)
 
 
-def _create_token(user_id: int) -> str:
-    """创建token并存储"""
+def _create_token(user_id: int, db: Session) -> str:
+    """创建token并持久化到数据库"""
+    import time
     token = _generate_token()
-    _token_store[token] = (user_id, time.time() + TOKEN_EXPIRE_SECONDS)
+    db.add(UserToken(token=token, user_id=user_id, expire_time=time.time() + TOKEN_EXPIRE_SECONDS))
+    db.commit()
     return token
 
 
-def _validate_token(token: str) -> Optional[int]:
+def _validate_token(token: str, db: Session) -> Optional[int]:
     """验证token，返回user_id或None"""
-    if token not in _token_store:
+    import time
+    token_record = db.query(UserToken).filter(UserToken.token == token).first()
+    if not token_record:
         return None
-    user_id, expire_time = _token_store[token]
-    if time.time() > expire_time:
-        del _token_store[token]
+    if time.time() > token_record.expire_time:
+        db.delete(token_record)
+        db.commit()
         return None
-    return user_id
+    return token_record.user_id
 
 
 class UserItem(BaseModel):
@@ -43,6 +46,8 @@ class UserItem(BaseModel):
     username: str
     is_admin: bool
     can_cleanup: bool
+    last_product: Optional[str] = None
+    last_version: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -54,6 +59,11 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     can_cleanup: Optional[bool] = None
+
+
+class UserPreferenceUpdate(BaseModel):
+    last_product: Optional[str] = None
+    last_version: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -71,7 +81,7 @@ def get_current_user(authorization: Optional[str] = Header(None), db: Session = 
         raise HTTPException(status_code=401, detail="未登录，请先登录")
     
     token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
-    user_id = _validate_token(token)
+    user_id = _validate_token(token, db)
     if user_id is None:
         raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
     
@@ -102,20 +112,22 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=401, detail="用户名不存在")
     
-    token = _create_token(user.id)
+    token = _create_token(user.id, db)
     return LoginResponse(
         token=token,
-        user=UserItem(id=user.id, username=user.username, is_admin=user.is_admin, can_cleanup=user.can_cleanup)
+        user=UserItem.model_validate(user)
     )
 
 
 @router.post("/logout")
-def logout(authorization: Optional[str] = Header(None)):
+def logout(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)):
     """用户登出"""
     if authorization:
         token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
-        if token in _token_store:
-            del _token_store[token]
+        token_record = db.query(UserToken).filter(UserToken.token == token).first()
+        if token_record:
+            db.delete(token_record)
+            db.commit()
     return {"message": "已登出"}
 
 
@@ -192,7 +204,7 @@ def delete_all_users(
     db: Session = Depends(get_db)
 ):
     """删除所有用户（仅管理员可操作）- 清空token并删除所有用户记录"""
-    _token_store.clear()
+    db.query(UserToken).delete()
     count = db.query(User).delete()
     db.commit()
     return {"message": f"已删除 {count} 个用户"}
@@ -201,6 +213,22 @@ def delete_all_users(
 @router.get("/me", response_model=UserItem)
 def get_current_user_info(user: User = Depends(get_current_user)):
     """获取当前用户信息"""
+    return user
+
+
+@router.patch("/me/preferences", response_model=UserItem)
+def update_user_preferences(
+    data: UserPreferenceUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """保存当前用户的产品/版本偏好"""
+    if data.last_product is not None:
+        user.last_product = data.last_product
+    if data.last_version is not None:
+        user.last_version = data.last_version
+    db.commit()
+    db.refresh(user)
     return user
 
 
@@ -228,10 +256,10 @@ def register(data: UserCreate, db: Session = Depends(get_db)):
     db.refresh(user)
     
     # 自动登录
-    token = _create_token(user.id)
+    token = _create_token(user.id, db)
     return LoginResponse(
         token=token,
-        user=UserItem(id=user.id, username=user.username, is_admin=user.is_admin, can_cleanup=user.can_cleanup)
+        user=UserItem.model_validate(user)
     )
 
 

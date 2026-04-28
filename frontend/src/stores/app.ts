@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { getCurrentUser } from '@/api/authAndBackup'
 
 export const useAppStore = defineStore('app', () => {
   const currentProduct = ref<string>('')
@@ -15,6 +16,9 @@ export const useAppStore = defineStore('app', () => {
   const canCleanup = ref<boolean>(localStorage.getItem('canCleanup') === 'true')
 
   const isLoggedIn = computed(() => !!token.value)
+
+  // 偏好是否已从后端加载（避免重复请求）
+  const preferencesLoaded = ref(false)
 
   function setProduct(product: string) {
     currentProduct.value = product
@@ -40,6 +44,7 @@ export const useAppStore = defineStore('app', () => {
     username.value = ''
     isAdmin.value = false
     canCleanup.value = false
+    preferencesLoaded.value = false
     localStorage.removeItem('token')
     localStorage.removeItem('username')
     localStorage.removeItem('isAdmin')
@@ -50,10 +55,28 @@ export const useAppStore = defineStore('app', () => {
     projectDataVersion.value++
   }
 
+  async function loadPreferencesFromBackend() {
+    if (preferencesLoaded.value || !token.value) return
+    try {
+      const res = await getCurrentUser()
+      const user = res.data
+      if (user.last_product) {
+        currentProduct.value = user.last_product
+      }
+      if (user.last_version) {
+        currentVersion.value = user.last_version
+      }
+      preferencesLoaded.value = true
+    } catch (e) {
+      // 未登录或请求失败，忽略
+    }
+  }
+
   return {
     currentProduct, currentVersion, setProduct, setVersion,
     projectDataVersion, bumpProjectDataVersion,
     token, username, isAdmin, canCleanup, isLoggedIn,
-    setLoginInfo, clearLoginInfo
+    setLoginInfo, clearLoginInfo,
+    preferencesLoaded, loadPreferencesFromBackend
   }
 })

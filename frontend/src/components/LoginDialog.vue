@@ -42,6 +42,13 @@ const doLogin = async () => {
   try {
     const res = await login(form.username)
     appStore.setLoginInfo(res.data.token, res.data.user)
+    const user = res.data.user
+    if (user.last_product) {
+      appStore.setProduct(user.last_product)
+    }
+    if (user.last_version) {
+      appStore.setVersion(user.last_version)
+    }
     ElMessage.success('登录成功')
     visible.value = false
   } catch (e: any) {

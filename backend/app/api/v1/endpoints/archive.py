@@ -47,6 +47,29 @@ class ArchiveUpdate(BaseModel):
     is_analyzed: Optional[bool] = None
     failure_reason: Optional[str] = None
     is_probabilistic: Optional[bool] = None
+    owner: Optional[str] = None
+
+
+class CleanupItem(BaseModel):
+    id: int
+    project_name: str
+    test_name: str
+    consecutive_success_days: int
+    is_analyzed: bool
+    failure_date: date
+    feature_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CleanupListResponse(BaseModel):
+    items: List[CleanupItem]
+    retention_days: int
+
+
+class CleanupRequest(BaseModel):
+    ids: List[int]
 
 
 class ExecutionHistoryItem(BaseModel):
@@ -159,6 +182,60 @@ def list_probabilistic_failures(
     return ArchiveListResponse(items=items, total=total, page=page, size=size)
 
 
+@router.get("/failures/cleanup-list", response_model=CleanupListResponse)
+def get_cleanup_list(
+    product_name: str = Query(...),
+    version: str = Query(...),
+    cleanup_user: User = Depends(require_cleanup),
+    archive_db: Session = Depends(get_archive_db),
+    db: Session = Depends(get_db)
+):
+    """获取可清理的归档记录列表"""
+    config = db.query(ProductVersionConfig).filter(
+        ProductVersionConfig.product_name == product_name,
+        ProductVersionConfig.version == version
+    ).first()
+    retention_days = config.retention_days if config else 30
+
+    to_cleanup = archive_db.query(ArchivedFailure).filter(
+        ArchivedFailure.product_name == product_name,
+        ArchivedFailure.version == version,
+        ArchivedFailure.is_analyzed == True,
+        ArchivedFailure.consecutive_success_days > 0,
+        ArchivedFailure.consecutive_success_days >= retention_days
+    ).order_by(ArchivedFailure.failure_date.desc()).all()
+
+    items = [
+        CleanupItem(
+            id=item.id,
+            project_name=item.project_name,
+            test_name=item.test_name,
+            consecutive_success_days=item.consecutive_success_days,
+            is_analyzed=item.is_analyzed,
+            failure_date=item.failure_date,
+            feature_name=item.feature_name
+        ) for item in to_cleanup
+    ]
+    return CleanupListResponse(items=items, retention_days=retention_days)
+
+
+@router.post("/failures/cleanup")
+def cleanup_archived_failures(
+    data: CleanupRequest,
+    cleanup_user: User = Depends(require_cleanup),
+    archive_db: Session = Depends(get_archive_db),
+):
+    """人工清理归档记录 - 根据选中的ID列表进行清理"""
+    count = 0
+    for item_id in data.ids:
+        item = archive_db.query(ArchivedFailure).get(item_id)
+        if item:
+            archive_db.delete(item)
+            count += 1
+    archive_db.commit()
+    return {"message": f"已清理 {count} 条归档记录", "count": count}
+
+
 @router.patch("/failures/{failure_id}")
 def update_archived_failure(failure_id: int, data: ArchiveUpdate, db: Session = Depends(get_archive_db)):
     """更新归档记录（标记分析状态、概率失败等）"""
@@ -171,45 +248,10 @@ def update_archived_failure(failure_id: int, data: ArchiveUpdate, db: Session = 
         failure.failure_reason = data.failure_reason
     if data.is_probabilistic is not None:
         failure.is_probabilistic = data.is_probabilistic
+    if data.owner is not None:
+        failure.owner = data.owner
     db.commit()
     return {"message": "归档记录已更新"}
-
-
-@router.delete("/failures/cleanup")
-def cleanup_archived_failures(
-    product_name: str = Query(...),
-    version: str = Query(...),
-    cleanup_user: User = Depends(require_cleanup),
-    archive_db: Session = Depends(get_archive_db),
-    db: Session = Depends(get_db)
-):
-    """人工清理归档记录 - 需要清理权限
-    使用产品版本级别的 retention_days 配置：
-    清理条件：已分析 且 连续成功天数 >= 该产品版本的 retention_days
-    未配置则默认 30 天
-    """
-    # 读取该产品版本的 retention_days 配置
-    config = db.query(ProductVersionConfig).filter(
-        ProductVersionConfig.product_name == product_name,
-        ProductVersionConfig.version == version
-    ).first()
-    retention_days = config.retention_days if config else 30
-
-    # 查找可清理的记录：已分析且连续成功天数 >= retention_days
-    to_cleanup = archive_db.query(ArchivedFailure).filter(
-        ArchivedFailure.product_name == product_name,
-        ArchivedFailure.version == version,
-        ArchivedFailure.is_analyzed == True,
-        ArchivedFailure.consecutive_success_days > 0,
-        ArchivedFailure.consecutive_success_days >= retention_days
-    ).all()
-
-    count = len(to_cleanup)
-    for item in to_cleanup:
-        archive_db.delete(item)
-    archive_db.commit()
-
-    return {"message": f"已清理 {count} 条归档记录（保留天数: {retention_days}天）", "count": count, "retention_days": retention_days}
 
 
 @router.get("/execution-history", response_model=ExecutionHistoryResponse)

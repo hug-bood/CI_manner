@@ -30,11 +30,6 @@
           <el-option label="未分析" :value="false" />
         </el-select>
       </el-form-item>
-      <el-form-item label="连续成功天数">
-        <el-input-number v-model="filter.consecutive_success_days_min" :min="0" placeholder="最小" size="small" style="width:90px" @change="fetchData" />
-        <span style="margin:0 4px">-</span>
-        <el-input-number v-model="filter.consecutive_success_days_max" :min="0" placeholder="最大" size="small" style="width:90px" @change="fetchData" />
-      </el-form-item>
       <el-form-item>
         <el-button size="small" @click="resetFilters">重置</el-button>
       </el-form-item>
@@ -101,14 +96,22 @@
           <el-tag :type="consecutiveTagType(row.consecutive_days)">{{ row.consecutive_days }}天</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="consecutive_success_days" label="连续成功" width="90" align="center">
+      <el-table-column label="失败原因" min-width="160">
         <template #default="{ row }">
-          <span v-if="row.consecutive_success_days > 0" style="color:#67c23a">{{ row.consecutive_success_days }}天</span>
-          <span v-else style="color:#909399">-</span>
+          <div v-if="editingKey !== row.id || editingField !== 'failure_reason'" class="editable-cell" :class="{ 'text-muted': !row.failure_reason }" @click="startEdit(row, 'failure_reason')">
+            {{ row.failure_reason || '点击填写' }}
+          </div>
+          <el-input v-else v-model="editValue" size="small" @blur="saveEdit(row)" @keyup.enter="saveEdit(row)" />
         </template>
       </el-table-column>
-      <el-table-column prop="failure_reason" label="失败原因" min-width="160" show-overflow-tooltip />
-      <el-table-column prop="owner" label="责任人" width="90" />
+      <el-table-column label="责任人" width="110">
+        <template #default="{ row }">
+          <div v-if="editingKey !== row.id || editingField !== 'owner'" class="editable-cell" :class="{ 'text-muted': !row.owner }" @click="startEdit(row, 'owner')">
+            {{ row.owner || '点击填写' }}
+          </div>
+          <el-input v-else v-model="editValue" size="small" @blur="saveEdit(row)" @keyup.enter="saveEdit(row)" />
+        </template>
+      </el-table-column>
       <el-table-column label="概率失败" width="80" align="center">
         <template #default="{ row }">
           <el-checkbox v-model="row.is_probabilistic" @change="(val: boolean) => onProbabilisticChange(row, val)" />
@@ -134,12 +137,28 @@
     />
 
     <!-- 人工清理弹窗 -->
-    <el-dialog v-model="cleanupDialogVisible" title="人工清理归档数据" width="500px">
-      <p>将清理已分析且连续成功天数 >= <b>{{ retentionDays }}</b>天的归档记录。</p>
-      <p style="color: #909399; font-size: 13px; margin-top: 8px;">保留天数可在上方卡片中编辑，按产品版本级别配置。</p>
+    <el-dialog v-model="cleanupDialogVisible" title="人工清理归档数据" width="700px" @open="fetchCleanupList">
+      <p style="margin-bottom: 12px">可清理记录（已分析且连续成功天数 >= <b>{{ cleanupRetentionDays }}</b>天）：</p>
+      <div v-loading="cleanupListLoading">
+        <div v-if="cleanupList.length === 0" style="color: #909399; text-align: center; padding: 20px;">暂无可清理记录</div>
+        <template v-else>
+          <div style="margin-bottom: 8px;">
+            <el-checkbox v-model="cleanupAllChecked" @change="onCleanupCheckAll">全选</el-checkbox>
+            <span style="margin-left: 12px; color: #909399; font-size: 13px;">已选 {{ cleanupSelectedIds.length }} / {{ cleanupList.length }} 条</span>
+          </div>
+          <el-table :data="cleanupList" stripe max-height="350" @selection-change="onCleanupSelectionChange" ref="cleanupTableRef">
+            <el-table-column type="selection" width="50" />
+            <el-table-column prop="feature_name" label="特性" width="120" />
+            <el-table-column prop="project_name" label="工程名" width="140" />
+            <el-table-column prop="test_name" label="用例名" min-width="200" />
+            <el-table-column prop="consecutive_success_days" label="连续成功天数" width="120" align="center" />
+            <el-table-column prop="failure_date" label="失败日期" width="110" />
+          </el-table>
+        </template>
+      </div>
       <template #footer>
         <el-button @click="cleanupDialogVisible = false">取消</el-button>
-        <el-button type="danger" @click="doCleanup" :loading="cleanupLoading">确认清理</el-button>
+        <el-button type="danger" @click="doCleanup" :loading="cleanupLoading" :disabled="cleanupSelectedIds.length === 0">确认清理（{{ cleanupSelectedIds.length }}条）</el-button>
       </template>
     </el-dialog>
 
@@ -163,6 +182,16 @@
         </el-table-column>
         <el-table-column prop="failure_reason" label="失败原因" min-width="200" show-overflow-tooltip />
       </el-table>
+      <el-pagination
+        v-model:current-page="historyPagination.page"
+        v-model:page-size="historyPagination.size"
+        :total="historyPagination.total"
+        :page-sizes="[20, 50, 200]"
+        layout="total, sizes, prev, pager, next"
+        @size-change="fetchHistoryData"
+        @current-change="fetchHistoryData"
+        style="margin-top: 12px; justify-content: flex-end;"
+      />
     </el-dialog>
   </div>
 </template>
@@ -170,7 +199,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
-import { getArchiveList, getProbabilisticFailures, updateArchiveFailure, cleanupArchiveFailures, getExecutionHistory, type ArchiveItem } from '@/api/archive'
+import { getArchiveList, getProbabilisticFailures, updateArchiveFailure, cleanupArchiveFailures, getExecutionHistory, getCleanupList, type ArchiveItem, type CleanupItem } from '@/api/archive'
 import { getProductVersionConfig, updateProductVersionConfig } from '@/api/productVersionConfig'
 import { getFeatureList, type FeatureItem } from '@/api/features'
 import { getCurrentUser, type UserItem } from '@/api/authAndBackup'
@@ -193,8 +222,6 @@ const filter = reactive({
   test_name: '',
   pl: '',
   is_analyzed: undefined as boolean | undefined,
-  consecutive_success_days_min: undefined as number | undefined,
-  consecutive_success_days_max: undefined as number | undefined
 })
 
 // 保留天数（产品版本级别）
@@ -209,12 +236,25 @@ const canCleanup = computed(() => currentUser.value?.is_admin || currentUser.val
 const isAdmin = computed(() => currentUser.value?.is_admin)
 const cleanupResultVisible = ref(false)
 const cleanupResultMessage = ref('')
+const cleanupList = ref<CleanupItem[]>([])
+const cleanupListLoading = ref(false)
+const cleanupSelectedIds = ref<number[]>([])
+const cleanupAllChecked = ref(true)
+const cleanupRetentionDays = ref(30)
+const cleanupTableRef = ref<any>(null)
 
 // 历史记录相关
 const historyDialogVisible = ref(false)
 const historyLoading = ref(false)
 const historyItems = ref<any[]>([])
 const historyTestName = ref('')
+const historyRow = ref<ArchiveItem | null>(null)
+const historyPagination = ref({ page: 1, size: 50, total: 0 })
+
+// 内联编辑
+const editingKey = ref<number | null>(null)
+const editingField = ref('')
+const editValue = ref('')
 
 const consecutiveTagType = (days: number) => {
   if (days >= 7) return 'danger'
@@ -289,8 +329,6 @@ const fetchData = async () => {
       pl: filter.pl || undefined,
       feature_name: filter.feature_name || undefined,
       is_analyzed: filter.is_analyzed,
-      consecutive_success_days_min: filter.consecutive_success_days_min,
-      consecutive_success_days_max: filter.consecutive_success_days_max,
       page: pagination.value.page,
       size: pagination.value.size
     }
@@ -321,8 +359,6 @@ const resetFilters = () => {
   filter.test_name = ''
   filter.pl = ''
   filter.is_analyzed = undefined
-  filter.consecutive_success_days_min = undefined
-  filter.consecutive_success_days_max = undefined
   pagination.value.page = 1
   fetchData()
 }
@@ -357,15 +393,72 @@ const toggleAnalyzed = async (row: ArchiveItem) => {
   }
 }
 
+const startEdit = (row: ArchiveItem, field: string) => {
+  editingKey.value = row.id
+  editingField.value = field
+  editValue.value = (row as any)[field] || ''
+}
+
+const saveEdit = async (row: ArchiveItem) => {
+  const field = editingField.value
+  const newVal = editValue.value.trim()
+  editingKey.value = null
+  editingField.value = ''
+  if (newVal === ((row as any)[field] || '')) return
+  try {
+    await updateArchiveFailure(row.id, { [field]: newVal || null })
+    ;(row as any)[field] = newVal || null
+    ElMessage.success('已更新')
+  } catch (e) {
+    ElMessage.error('更新失败')
+  }
+}
+
 const showCleanupDialog = () => {
   cleanupDialogVisible.value = true
 }
 
-const doCleanup = async () => {
+const fetchCleanupList = async () => {
   if (!appStore.currentProduct || !appStore.currentVersion) return
+  cleanupListLoading.value = true
+  cleanupSelectedIds.value = []
+  cleanupAllChecked.value = true
+  try {
+    const res = await getCleanupList(appStore.currentProduct, appStore.currentVersion)
+    cleanupList.value = res.data.items
+    cleanupRetentionDays.value = res.data.retention_days
+    cleanupSelectedIds.value = res.data.items.map(item => item.id)
+  } catch (e) {
+    ElMessage.error('获取可清理列表失败')
+  } finally {
+    cleanupListLoading.value = false
+  }
+}
+
+const onCleanupSelectionChange = (selection: CleanupItem[]) => {
+  cleanupSelectedIds.value = selection.map(item => item.id)
+  cleanupAllChecked.value = selection.length === cleanupList.value.length
+}
+
+const onCleanupCheckAll = (val: boolean) => {
+  if (val) {
+    cleanupSelectedIds.value = cleanupList.value.map(item => item.id)
+    cleanupTableRef.value?.clearSelection()
+    cleanupList.value.forEach(row => cleanupTableRef.value?.toggleRowSelection(row, true))
+  } else {
+    cleanupSelectedIds.value = []
+    cleanupTableRef.value?.clearSelection()
+  }
+}
+
+const doCleanup = async () => {
+  if (cleanupSelectedIds.value.length === 0) {
+    ElMessage.warning('请至少选择一条记录')
+    return
+  }
   cleanupLoading.value = true
   try {
-    const res = await cleanupArchiveFailures(appStore.currentProduct, appStore.currentVersion)
+    const res = await cleanupArchiveFailures(cleanupSelectedIds.value)
     cleanupDialogVisible.value = false
     cleanupResultMessage.value = res.data.message
     cleanupResultVisible.value = true
@@ -379,7 +472,15 @@ const doCleanup = async () => {
 
 const showHistory = async (row: ArchiveItem) => {
   historyTestName.value = row.test_name
+  historyRow.value = row
+  historyPagination.value = { page: 1, size: 50, total: 0 }
   historyDialogVisible.value = true
+  await fetchHistoryData()
+}
+
+const fetchHistoryData = async () => {
+  if (!historyRow.value) return
+  const row = historyRow.value
   historyLoading.value = true
   try {
     const res = await getExecutionHistory({
@@ -387,10 +488,11 @@ const showHistory = async (row: ArchiveItem) => {
       version: row.version,
       project_name: row.project_name,
       test_name: row.test_name,
-      page: 1,
-      size: 50
+      page: historyPagination.value.page,
+      size: historyPagination.value.size
     })
     historyItems.value = res.data.items
+    historyPagination.value.total = res.data.total
   } catch (e) {
     ElMessage.error('获取历史记录失败')
   } finally {
@@ -458,5 +560,22 @@ onMounted(() => {
 .retention-edit {
   display: inline-flex;
   align-items: center;
+}
+.editable-cell {
+  min-height: 32px;
+  line-height: 32px;
+  padding: 0 8px;
+  border-radius: 4px;
+  cursor: text;
+  transition: background-color 0.2s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.editable-cell:hover {
+  background-color: #f5f7fa;
+}
+.text-muted {
+  color: #c0c4cc;
 }
 </style>

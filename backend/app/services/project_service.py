@@ -26,8 +26,16 @@ def recalc_project_stats(db: Session, project_id: int):
     project.total_failed_cases = failed or 0
     project.analyzed_failed_cases = analyzed or 0
 
-    if project.status != 'lost':
-        project.status = 'failure' if project.total_failed_cases > 0 else 'success'
+    if project.total_failed_cases == 0:
+        # 没有失败用例，状态为成功
+        project.status = 'success'
+    elif project.analyzed_failed_cases >= project.total_failed_cases:
+        # 所有失败用例都已分析（已修复），状态自动置为成功
+        project.status = 'success'
+    elif project.status in ('success', 'active'):
+        # 有未分析的失败用例，状态应为失败
+        project.status = 'failure'
+    # 其他情况（如当前已是 failure/lost）保持不变
 
     db.commit()
 

@@ -12,7 +12,29 @@
     </el-row>
 
     <el-table :data="configs" stripe v-loading="loading" style="width: 100%">
-      <el-table-column prop="project_name" label="工程" min-width="180" />
+      <el-table-column label="特性" width="180">
+        <template #default="{ row }">
+          <div v-if="editingKey !== rowKey(row) || editingField !== 'feature'" class="editable-cell" :class="{ 'text-muted': !row.feature_names?.length }" @click="startEditFeature(row)">
+            {{ row.feature_names?.join(', ') || '点击填写' }}
+          </div>
+          <el-select
+            v-else
+            v-model="editFeatureIds"
+            multiple
+            size="small"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="选择特性"
+            style="width: 100%"
+            @change="onFeatureSelectChange"
+            @blur="saveFeatureEdit(row)"
+          >
+            <el-option v-for="f in allFeatures" :key="f.id" :label="f.feature_name" :value="f.id" />
+          </el-select>
+        </template>
+      </el-table-column>
+      <el-table-column prop="project_name" label="工程名" min-width="180" />
       <el-table-column label="PL" width="140">
         <template #default="{ row }">
           <div v-if="editingKey !== rowKey(row) || editingField !== 'pl'" class="editable-cell" :class="{ 'text-muted': !row.pl }" @click="startEdit(row, 'pl')">
@@ -48,10 +70,15 @@
     />
 
     <!-- 新增弹窗 -->
-    <el-dialog v-model="addDialogVisible" title="新增工程配置" width="400px">
+    <el-dialog v-model="addDialogVisible" title="新增工程配置" width="400px" @open="fetchFeatures">
       <el-form :model="addForm" label-width="80px">
         <el-form-item label="工程名">
           <el-input v-model="addForm.project_name" />
+        </el-form-item>
+        <el-form-item label="特性">
+          <el-select v-model="addForm.feature_ids" multiple filterable allow-create default-first-option placeholder="选择特性" style="width: 100%">
+            <el-option v-for="f in allFeatures" :key="f.id" :label="f.feature_name" :value="f.id" />
+          </el-select>
         </el-form-item>
         <el-form-item label="PL">
           <el-input v-model="addForm.pl" />
@@ -74,6 +101,7 @@ import { useAppStore } from '@/stores/app'
 import { getUnifiedProjectList, type UnifiedProjectItem } from '@/api/projects'
 import { createProjectConfig, updateProjectConfig, deleteProjectConfig, uploadProjectConfigs, downloadProjectConfigs } from '@/api/projectConfigs'
 import { updateProject, deleteProject } from '@/api/projects'
+import { getFeatureList, createFeature, bindProjectFeature, unbindProjectFeature, type FeatureItem } from '@/api/features'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const appStore = useAppStore()
@@ -93,7 +121,12 @@ const editInputRef = ref<HTMLInputElement>()
 
 // 新增弹窗
 const addDialogVisible = ref(false)
-const addForm = reactive({ project_name: '', pl: '', owner: '' })
+const addForm = reactive({ project_name: '', pl: '', owner: '', feature_ids: [] as number[] })
+
+// 特性编辑
+const allFeatures = ref<FeatureItem[]>([])
+const editFeatureIds = ref<number[]>([])
+const editingFeatureRow = ref<UnifiedProjectItem | null>(null)
 
 const fetchData = async () => {
   if (!appStore.currentProduct || !appStore.currentVersion) return
@@ -119,6 +152,81 @@ const startEdit = (row: UnifiedProjectItem, field: string) => {
   nextTick(() => editInputRef.value?.focus())
 }
 
+const fetchFeatures = async () => {
+  if (!appStore.currentProduct || !appStore.currentVersion) return
+  try {
+    const res = await getFeatureList({ product_name: appStore.currentProduct, version: appStore.currentVersion })
+    allFeatures.value = res.data.items
+  } catch (e) { /* ignore */ }
+}
+
+const startEditFeature = async (row: UnifiedProjectItem) => {
+  await fetchFeatures()
+  editingKey.value = rowKey(row)
+  editingField.value = 'feature'
+  editingFeatureRow.value = row
+  const existingIds = allFeatures.value
+    .filter(f => row.feature_names?.includes(f.feature_name))
+    .map(f => f.id)
+  editFeatureIds.value = existingIds
+}
+
+const onFeatureSelectChange = async (val: (number | string)[]) => {
+  // allow-create 可能创建字符串值（新特性名），需要先创建特性
+  const row = editingFeatureRow.value
+  if (!row || !appStore.currentProduct || !appStore.currentVersion) return
+
+  for (const v of val) {
+    if (typeof v === 'string' && !allFeatures.value.some(f => f.feature_name === v)) {
+      try {
+        const res = await createFeature({ product_name: appStore.currentProduct, version: appStore.currentVersion, feature_name: v })
+        allFeatures.value.push(res.data)
+        const idx = editFeatureIds.value.indexOf(v as any)
+        if (idx !== -1) editFeatureIds.value[idx] = res.data.id
+      } catch (e) { /* ignore */ }
+    }
+  }
+}
+
+const saveFeatureEdit = async (row: UnifiedProjectItem) => {
+  editingKey.value = null
+  editingField.value = ''
+  if (!row.project_id || !appStore.currentProduct || !appStore.currentVersion) return
+
+  const selectedFeatureIds = new Set(editFeatureIds.value)
+  const oldFeatureNames = row.feature_names || []
+  const oldFeatureIds = allFeatures.value
+    .filter(f => oldFeatureNames.includes(f.feature_name))
+    .map(f => f.id)
+  const oldSet = new Set(oldFeatureIds)
+
+  try {
+    // 绑定新增的
+    for (const fid of selectedFeatureIds) {
+      if (!oldSet.has(fid)) {
+        await bindProjectFeature(row.project_id, fid)
+      }
+    }
+    // 解绑移除的
+    for (const fid of oldSet) {
+      if (!selectedFeatureIds.has(fid)) {
+        await unbindProjectFeature(row.project_id, fid)
+      }
+    }
+    // 更新本地显示
+    const newNames = allFeatures.value
+      .filter(f => selectedFeatureIds.has(f.id))
+      .map(f => f.feature_name)
+    row.feature_names = newNames
+    appStore.bumpProjectDataVersion()
+    ElMessage.success('特性已更新')
+  } catch (e) {
+    ElMessage.error('特性更新失败')
+    fetchData()
+  }
+  editingFeatureRow.value = null
+}
+
 const saveEdit = async (row: UnifiedProjectItem) => {
   const field = editingField.value
   editingKey.value = null
@@ -127,12 +235,10 @@ const saveEdit = async (row: UnifiedProjectItem) => {
   const newVal = editValue.value.trim()
   if (newVal === ((row as any)[field] || '')) return
   try {
-    // 同时更新两表
-    if (row.project_id) {
-      await updateProject(row.project_id, { [field]: newVal || null })
-    }
     if (row.config_id) {
       await updateProjectConfig(row.config_id, { [field]: newVal || null })
+    } else if (row.project_id) {
+      await updateProject(row.project_id, { [field]: newVal || null })
     }
     ;(row as any)[field] = newVal || null
     appStore.bumpProjectDataVersion()
@@ -144,6 +250,7 @@ const showAddDialog = () => {
   addForm.project_name = ''
   addForm.pl = ''
   addForm.owner = ''
+  addForm.feature_ids = []
   addDialogVisible.value = true
 }
 
@@ -151,13 +258,27 @@ const doAdd = async () => {
   if (!appStore.currentProduct || !appStore.currentVersion) return
   if (!addForm.project_name) { ElMessage.warning('请输入工程名'); return }
   try {
-    await createProjectConfig({
+    const res = await createProjectConfig({
       product_name: appStore.currentProduct,
       version: appStore.currentVersion,
       project_name: addForm.project_name,
       pl: addForm.pl || undefined,
       owner: addForm.owner || undefined
     })
+    // 绑定特性（需要 project_id，从 unified-projects 获取）
+    if (addForm.feature_ids.length > 0) {
+      const listRes = await getUnifiedProjectList({
+        product_name: appStore.currentProduct,
+        version: appStore.currentVersion,
+        page: 1, size: 100
+      })
+      const proj = listRes.data.items.find(i => i.project_name === addForm.project_name)
+      if (proj?.project_id) {
+        for (const fid of addForm.feature_ids) {
+          await bindProjectFeature(proj.project_id, fid)
+        }
+      }
+    }
     ElMessage.success('新增成功')
     addDialogVisible.value = false
     appStore.bumpProjectDataVersion()
@@ -229,7 +350,7 @@ watch(() => appStore.projectDataVersion, () => {
   fetchData()
 })
 
-onMounted(() => { if (appStore.currentProduct && appStore.currentVersion) fetchData() })
+onMounted(() => { if (appStore.currentProduct && appStore.currentVersion) { fetchData(); fetchFeatures() } })
 </script>
 
 <style scoped>

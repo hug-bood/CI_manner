@@ -5,10 +5,12 @@ from fastapi.encoders import jsonable_encoder
 from app.models.project import Project
 from app.models.project_config import ProjectConfig
 from app.models.test_case import TestCase
+from app.models.archive import TestCaseExecutionHistory
 from app.schemas.report import ReportCreate
 from app.services.project_service import recalc_project_stats
 from app.services.log_service import download_and_extract_zip
 from app.services.xml_parser import find_and_parse_result_xml
+from app.core.database import ArchiveSessionLocal
 
 def parse_version(version_str: str):
     """从完整版本字符串提取产品名和版本号"""
@@ -145,6 +147,30 @@ def process_report(db: Session, report: ReportCreate):
         processed_test_cases.append(test_case)
 
     db.commit()
+
+    # 同步写入执行历史到归档库
+    try:
+        archive_db = ArchiveSessionLocal()
+        execution_date = (report.timestamp or datetime.utcnow()).date()
+        for tc in processed_test_cases:
+            history_entry = TestCaseExecutionHistory(
+                product_name=product_name,
+                version=report.version,
+                project_name=report.test_project_name,
+                test_name=tc.test_name,
+                execution_date=execution_date,
+                status=tc.status,
+                failure_reason=tc.failure_reason
+            )
+            archive_db.add(history_entry)
+        archive_db.commit()
+    except Exception as e:
+        print(f"Failed to write execution history: {e}")
+    finally:
+        try:
+            archive_db.close()
+        except:
+            pass
 
     # 5. 重新计算工程统计
     recalc_project_stats(db, project.id)

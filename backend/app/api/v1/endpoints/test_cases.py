@@ -18,6 +18,7 @@ class TestCaseUpdate(BaseModel):
     failure_reason: Optional[str] = None
     is_analyzed: Optional[bool] = None
     is_source_code_issue: Optional[bool] = None
+    is_probabilistic: Optional[bool] = None
     dts_ticket: Optional[str] = None
 
 class AnalyzeRequest(BaseModel):
@@ -68,6 +69,8 @@ def update_test_case(test_case_id: int, update_data: TestCaseUpdate, db: Session
         test_case.is_analyzed = update_data.is_analyzed
     if update_data.is_source_code_issue is not None:
         test_case.is_source_code_issue = update_data.is_source_code_issue
+    if update_data.is_probabilistic is not None:
+        test_case.is_probabilistic = update_data.is_probabilistic
     if update_data.dts_ticket is not None:
         test_case.dts_ticket = update_data.dts_ticket
 
@@ -136,6 +139,7 @@ def list_test_cases(
             report_date=tc.report_date,
             last_report_at=tc.last_report_at,
             is_source_code_issue=tc.is_source_code_issue,
+            is_probabilistic=tc.is_probabilistic,
             dts_ticket=tc.dts_ticket,
             dts_link=dts_link,
             xml_summary=tc.xml_summary

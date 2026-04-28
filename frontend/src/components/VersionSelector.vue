@@ -34,6 +34,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { getProducts, type ProductVersionItem } from '@/api/projects'
+import { saveUserPreferences } from '@/api/authAndBackup'
 import { ElMessage } from 'element-plus'
 
 const appStore = useAppStore()
@@ -47,27 +48,24 @@ const currentVersions = computed(() => {
   return product?.versions || []
 })
 
-// 获取产品列表
 const fetchProducts = async () => {
+  if (appStore.isLoggedIn && !appStore.preferencesLoaded) {
+    await appStore.loadPreferencesFromBackend()
+  }
   try {
     const res = await getProducts()
     products.value = res.data.products
 
-    // 如果 store 中已有产品/版本，则恢复选中
     if (appStore.currentProduct) {
       selectedProduct.value = appStore.currentProduct
     } else if (products.value.length > 0) {
-      // 否则默认选中第一个产品
       selectedProduct.value = products.value[0].product_name
     }
-
-    // 版本在 watch 中自动处理
   } catch (e) {
     ElMessage.error('获取产品列表失败')
   }
 }
 
-// 当选中产品变化时，自动设置版本
 watch(selectedProduct, (newProduct) => {
   if (!newProduct) {
     selectedVersion.value = ''
@@ -76,7 +74,6 @@ watch(selectedProduct, (newProduct) => {
 
   const versions = currentVersions.value
   if (versions.length > 0) {
-    // 如果 store 中有该产品下的版本，优先使用
     if (appStore.currentProduct === newProduct && appStore.currentVersion) {
       selectedVersion.value = appStore.currentVersion
     } else {
@@ -87,13 +84,14 @@ watch(selectedProduct, (newProduct) => {
   }
 }, { immediate: true })
 
-// 监听产品+版本组合变化，自动更新 store
 watch([selectedProduct, selectedVersion], ([product, version]) => {
   if (product && version) {
-    // 避免重复更新 store（防止死循环）
     if (appStore.currentProduct !== product || appStore.currentVersion !== version) {
       appStore.setProduct(product)
       appStore.setVersion(version)
+      if (appStore.isLoggedIn) {
+        saveUserPreferences({ last_product: product, last_version: version }).catch(() => {})
+      }
     }
   }
 })

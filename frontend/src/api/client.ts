@@ -28,7 +28,6 @@ client.interceptors.response.use(
       localStorage.removeItem('username')
       localStorage.removeItem('isAdmin')
       localStorage.removeItem('canCleanup')
-      // 触发全局事件，由 Layout 中的 LoginDialog 响应
       window.dispatchEvent(new CustomEvent('auth-required'))
     } else {
       ElMessage.error(error.response?.data?.detail || '请求失败')

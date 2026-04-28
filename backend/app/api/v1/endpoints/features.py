@@ -3,11 +3,28 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 from pydantic import BaseModel
 
-from app.core.database import get_db
+from app.core.database import get_db, get_archive_db, ArchiveSessionLocal
 from app.models.feature import Feature, ProjectFeatureMapping
 from app.models.project import Project
+from app.models.archive import ArchivedFailure
 
 router = APIRouter(prefix="/features", tags=["features"])
+
+
+def _sync_archive_feature_name(project_name: str, product_name: str, feature_names: str, archive_db: Session):
+    """同步更新归档表中该工程的 feature_name（跨所有版本）"""
+    archive_db.query(ArchivedFailure).filter(
+        ArchivedFailure.project_name == project_name,
+        ArchivedFailure.product_name == product_name
+    ).update({ArchivedFailure.feature_name: feature_names})
+
+
+def _get_project_feature_names(project_id: int, db: Session) -> str:
+    """获取工程关联的所有特性名，逗号分隔"""
+    mappings = db.query(ProjectFeatureMapping, Feature.feature_name).join(
+        Feature, ProjectFeatureMapping.feature_id == Feature.id
+    ).filter(ProjectFeatureMapping.project_id == project_id).all()
+    return ','.join([name for _, name in mappings])
 
 
 class FeatureItem(BaseModel):
@@ -93,6 +110,18 @@ def update_feature(feature_id: int, data: FeatureUpdate, db: Session = Depends(g
         feature.description = data.description
     db.commit()
     db.refresh(feature)
+    # 特性改名时，同步所有绑定工程的归档表 feature_name
+    bindings = db.query(ProjectFeatureMapping).filter_by(feature_id=feature_id).all()
+    archive_db = ArchiveSessionLocal()
+    try:
+        for b in bindings:
+            project = db.query(Project).get(b.project_id)
+            if project:
+                fn = _get_project_feature_names(b.project_id, db)
+                _sync_archive_feature_name(project.project_name, project.product_name, fn, archive_db)
+        archive_db.commit()
+    finally:
+        archive_db.close()
     return feature
 
 
@@ -102,10 +131,21 @@ def delete_feature(feature_id: int, db: Session = Depends(get_db)):
     feature = db.query(Feature).get(feature_id)
     if not feature:
         raise HTTPException(status_code=404, detail="Feature not found")
-    # 删除关联映射
+    bindings = db.query(ProjectFeatureMapping).filter_by(feature_id=feature_id).all()
+    project_ids = [b.project_id for b in bindings]
     db.query(ProjectFeatureMapping).filter_by(feature_id=feature_id).delete()
     db.delete(feature)
     db.commit()
+    archive_db = ArchiveSessionLocal()
+    try:
+        for pid in project_ids:
+            project = db.query(Project).get(pid)
+            if project:
+                fn = _get_project_feature_names(pid, db)
+                _sync_archive_feature_name(project.project_name, project.product_name, fn, archive_db)
+        archive_db.commit()
+    finally:
+        archive_db.close()
     return {"message": "Feature deleted"}
 
 
@@ -126,6 +166,14 @@ def bind_project_feature(data: ProjectFeatureBinding, db: Session = Depends(get_
     binding = ProjectFeatureMapping(project_id=data.project_id, feature_id=data.feature_id)
     db.add(binding)
     db.commit()
+    # 同步归档表 feature_name
+    feature_names = _get_project_feature_names(data.project_id, db)
+    archive_db = ArchiveSessionLocal()
+    try:
+        _sync_archive_feature_name(project.project_name, project.product_name, feature_names, archive_db)
+        archive_db.commit()
+    finally:
+        archive_db.close()
     return {"message": "Project bound to feature"}
 
 
@@ -137,8 +185,18 @@ def unbind_project_feature(data: ProjectFeatureBinding, db: Session = Depends(ge
     ).first()
     if not binding:
         raise HTTPException(status_code=404, detail="Binding not found")
+    project = db.query(Project).get(data.project_id)
     db.delete(binding)
     db.commit()
+    # 同步归档表 feature_name
+    if project:
+        feature_names = _get_project_feature_names(data.project_id, db)
+        archive_db = ArchiveSessionLocal()
+        try:
+            _sync_archive_feature_name(project.project_name, project.product_name, feature_names, archive_db)
+            archive_db.commit()
+        finally:
+            archive_db.close()
     return {"message": "Project unbound from feature"}
 
 

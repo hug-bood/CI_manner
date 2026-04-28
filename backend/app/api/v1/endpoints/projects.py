@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.models.project import Project
 from app.models.project_config import ProjectConfig
 from app.models.test_case import TestCase
+from app.models.feature import Feature, ProjectFeatureMapping
 from app.schemas.project import (
     ProjectItem, ProjectListResponse, SummaryResponse, ProjectCreate, ProjectUpdate
 )
@@ -28,6 +29,7 @@ class UnifiedProjectItem(BaseModel):
     product_name: str
     version: str
     project_name: str
+    feature_names: List[str] = []         # 关联的特性名列表
     # 以下字段来自 Project（不存在时为默认值）
     status: str = "lost"
     failure_reason: Optional[str] = None
@@ -76,6 +78,19 @@ def list_unified_projects(
     project_map = {p.project_name: p for p in projects}
     config_map = {c.project_name: c for c in configs}
 
+    # 批量查询特性映射
+    project_ids = [p.id for p in projects]
+    feature_map = {}
+    if project_ids:
+        mappings = db.query(ProjectFeatureMapping, Feature.feature_name).join(
+            Feature, ProjectFeatureMapping.feature_id == Feature.id
+        ).filter(ProjectFeatureMapping.project_id.in_(project_ids)).all()
+        for mapping, feature_name in mappings:
+            pid = mapping.project_id
+            if pid not in feature_map:
+                feature_map[pid] = []
+            feature_map[pid].append(feature_name)
+
     # 合并：取两表 project_name 的并集
     all_names = set(project_map.keys()) | set(config_map.keys())
 
@@ -88,12 +103,16 @@ def list_unified_projects(
         owner_val = (p.owner if p and p.owner else (c.owner if c else None))
         pl_val = (p.pl if p and p.pl else (c.pl if c else None))
 
+        # 获取特性名列表
+        fnames = feature_map.get(p.id, []) if p else []
+
         item = UnifiedProjectItem(
             project_id=p.id if p else None,
             config_id=c.id if c else None,
             product_name=product_name,
             version=version,
             project_name=name,
+            feature_names=fnames,
             status=p.status if p else "lost",
             failure_reason=p.failure_reason if p else None,
             total_cases=p.total_cases if p else 0,
@@ -182,11 +201,21 @@ def get_summary(
         Project.version == version
     ).all()
 
-    total = len(projects)
-    failed = sum(1 for p in projects if p.status == "failure")
+    # 同时包含仅存在于 ProjectConfig 的工程（视为 lost）
+    config_only = db.query(ProjectConfig).filter(
+        ProjectConfig.product_name == product_name,
+        ProjectConfig.version == version,
+        ~ProjectConfig.project_name.in_([p.project_name for p in projects])
+    ).all()
+
+    total = len(projects) + len(config_only)
+    failed = sum(1 for p in projects if p.status in ("failure", "lost")) + len(config_only)
     total_failed_cases = sum(p.total_failed_cases for p in projects)
 
     failure_rates = [compute_failure_rate(p) for p in projects if p.total_cases > 0]
+    # lost 工程（无用例数据）视为 100% 失败率
+    lost_count = sum(1 for p in projects if p.status == "lost" and p.total_cases == 0) + len(config_only)
+    failure_rates.extend([100.0] * lost_count)
     avg_failure_rate = round(mean(failure_rates), 2) if failure_rates else 0.0
 
     progresses = [compute_analysis_progress(p) for p in projects if p.total_failed_cases > 0]
@@ -342,24 +371,17 @@ def create_project(project_data: ProjectCreate, db: Session = Depends(get_db)):
     )
     db.add(project)
     db.flush()
-    # 同步创建或更新 ProjectConfig
+    # 确保 ProjectConfig 存在（不覆盖 owner/pl）
     config = db.query(ProjectConfig).filter_by(
         product_name=project_data.product_name,
         version=project_data.version,
         project_name=project_data.project_name
     ).first()
-    if config:
-        if project_data.owner is not None:
-            config.owner = project_data.owner
-        if project_data.pl is not None:
-            config.pl = project_data.pl
-    else:
+    if not config:
         config = ProjectConfig(
             product_name=project_data.product_name,
             version=project_data.version,
-            project_name=project_data.project_name,
-            owner=project_data.owner,
-            pl=project_data.pl
+            project_name=project_data.project_name
         )
         db.add(config)
     db.commit()
@@ -377,27 +399,10 @@ def update_project(project_id: int, update_data: ProjectUpdate, db: Session = De
         project.pl = update_data.pl
     if update_data.failure_reason is not None:
         project.failure_reason = update_data.failure_reason
-    # 同步更新 ProjectConfig 的 owner/pl
-    config = db.query(ProjectConfig).filter_by(
-        product_name=project.product_name,
-        version=project.version,
-        project_name=project.project_name
-    ).first()
-    if config:
-        if update_data.owner is not None:
-            config.owner = update_data.owner
-        if update_data.pl is not None:
-            config.pl = update_data.pl
-    else:
-        # ProjectConfig 不存在则自动创建
-        config = ProjectConfig(
-            product_name=project.product_name,
-            version=project.version,
-            project_name=project.project_name,
-            owner=project.owner,
-            pl=project.pl
-        )
-        db.add(config)
+    if update_data.status is not None:
+        if update_data.status not in ('success', 'failure', 'lost'):
+            raise HTTPException(status_code=400, detail="Invalid status value, must be success/failure/lost")
+        project.status = update_data.status
     db.commit()
     return {"message": "Project updated"}
 
